@@ -1,12 +1,12 @@
 [submodule "tools/yosys"]
-	path = tools/yosys
-	url = ../../The-OpenROAD-Project/yosys.git
+	path = OpenROAD-flow-scripts/tools/yosys
+	url = https://github.com/The-OpenROAD-Project/yosys.git
 [submodule "tools/OpenROAD"]
-	path = tools/OpenROAD
-	url = ../OpenROAD.git
+	path = OpenROAD-flow-scripts/tools/OpenROAD
+	url = https://github.com/ytliu8464/OpenROAD.git
 [submodule "tools/yosys-slang"]
-	path = tools/yosys-slang
+	path = OpenROAD-flow-scripts/tools/yosys-slang
 	url = https://github.com/povik/yosys-slang.git
 [submodule "tools/kepler-formal"]
-	path = tools/kepler-formal
+	path = OpenROAD-flow-scripts/tools/kepler-formal
 	url = https://github.com/keplertech/kepler-formal
