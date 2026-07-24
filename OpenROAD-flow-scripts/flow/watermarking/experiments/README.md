@@ -104,23 +104,24 @@ experiments/
 
 ### 2a. Environment
 
-All scripts assume you are on the lab server with:
-- Singularity image at `/home/tool/singularity/images/ispd26.sif` (contains OpenROAD, Python 3.12, sklearn, matplotlib)
-- OpenROAD binary at `OR0415/OpenROAD/build/bin/openroad`
-- Project root at `/home/fetzfs_projects/MISC-ytliu/watermarking`
+All scripts assume:
+- An OpenROAD binary built with the PDMarks routing commands (`OPENROAD_EXE`)
+- An ORFS flow root containing the reference-flow results (`ORFS_FLOW_HOME`)
+- Python 3.11+ with `numpy`, `scikit-learn`, and `matplotlib` available
+  (directly, or via a container that `sbpy` can reach)
 
 Override any of these via environment variables:
 
 ```bash
-export PROJ_DIR=/my/other/location
+export ORFS_FLOW_HOME=/path/to/OpenROAD-flow-scripts/flow
 export OPENROAD_EXE=/path/to/openroad
-export SINGULARITY_SIF=/path/to/ispd26.sif
+export SINGULARITY_SIF=/path/to/container.sif   # optional; used by sbpy
 ```
 
 ### 2b. Reference flow results
 
-The 10 active benches must have a completed reference ORFS run (`6_report.json` on disk).
-These are already present. To add a new design later:
+Every bench must have a completed reference ORFS run (`6_report.json` on disk)
+before any watermarking. To produce one:
 
 ```bash
 DESIGN=my_design PLATFORM=nangate45 WM_FLOW_VARIANT=base \
@@ -162,10 +163,10 @@ Generate the owner keypair and per-design seed bundle. The drivers call
 `ensure_keys` automatically, but you can do it manually:
 
 ```bash
-cd OR0415/OpenROAD-flow-scripts/flow/watermarking/gen_key
-./gen_key.sh keygen --owner-id yiting --out-dir keys
+cd "$ORFS_FLOW_HOME"/watermarking/gen_key
+./gen_key.sh keygen --owner-id <owner-id> --out-dir keys
 ./gen_key.sh sign --sk keys/sk.pem --pk keys/pk.pem \
-    --owner-id yiting --design-id aes --out-dir out/aes --force
+    --owner-id <owner-id> --design-id aes --out-dir out/aes --force
 ```
 
 Outputs `out/<design>/seed_placement.hex`, `seed_cts.hex`, `seed_routing.hex`.
@@ -245,13 +246,13 @@ done
 
 | Driver | Module written to | Default `FLOW_VARIANT` | Pattern |
 |---|---|---|---|
-| `run_p_only.sh` | `place_ordering` | `pdmarks-p-only` | fixed |
-| `run_c_only.sh` | `cts_v2` | `pdmarks-c-only` | fixed |
-| `run_r_only.sh` | `routing_wrong_way` | `pdmarks-r-only` | fixed |
+| `run_p_only.sh` | `placement_wm` | `pdmarks-p-only` | fixed |
+| `run_c_only.sh` | `cts_wm` | `pdmarks-c-only` | fixed |
+| `run_r_only.sh` | `routing_wm` | `pdmarks-r-only` | fixed |
 | `run_all_stage.sh` | all three | `pdmarks-all-stage` | fixed |
-| `place_ordering/run_ppa.sh` (direct) | `place_ordering` | `{WM_FLOW_VARIANT}-ppa-v2` | derived |
-| `cts_v2/run_ppa.sh` (direct) | `cts_v2` | `{WM_FLOW_VARIANT}-ppa-run2` | derived |
-| `routing_wrong_way/run.sh` (direct) | `routing_wrong_way` | `route-wm-wrong-way` | fixed |
+| `placement_wm/run_ppa.sh` (direct) | `placement_wm` | `{WM_FLOW_VARIANT}-ppa-v2` | derived |
+| `cts_wm/run_ppa.sh` (direct) | `cts_wm` | `{WM_FLOW_VARIANT}-ppa-run2` | derived |
+| `routing_wm/run.sh` (direct) | `routing_wm` | `route-wm-wrong-way` | fixed |
 
 > The experiment analysis scripts (`phase1_ppa.py`, `phase1_survival.py`, etc.) use
 > `find_latest_wm_variant(module, plat, design)` to **auto-discover** the most recently
@@ -416,7 +417,7 @@ python3.11 render_tex.py
 ```bash
 python3.11 phase1_capacity.py
 # reads: watermarking/{module}/wm_log/{design}_run_*.log
-#        routing_wrong_way/results/{plat}/{design}/{latest}/watermark_nets.txt
+#        routing_wm/results/{plat}/{design}/{latest}/watermark_nets.txt
 # writes: results/phase1/raw/capacity_*.json
 ```
 
@@ -643,7 +644,7 @@ python3.11 attacks/ppa/run_attack_ppa.py --attack blind    --dry-run
 python3.11 attacks/ppa/run_attack_ppa.py --attack targeted --dry-run
 
 # 2) Re-run the back-end:  placement attack → CTS+route+finish via
-#    place_ordering/run_ppa.sh;  CTS attack → route+finish via cts_v2/run_ppa.sh.
+#    placement_wm/run_ppa.sh;  CTS attack → route+finish via cts_wm/run_ppa.sh.
 #    Long: minutes-to-hours per design.  Filter to taste.
 ./sbpy attacks/ppa/run_attack_ppa.py --qs 0.10,0.20
 ./sbpy attacks/ppa/run_attack_ppa.py --designs aes,jpeg --stages placement
@@ -793,7 +794,7 @@ Symptoms you may see and what they mean:
 
 | Symptom | Cause | Resolution |
 |---|---|---|
-| Routing attack aborts with `Error: invalid command name "odb::dbBoolProperty_destroy"` | Outdated `routing_wrong_way/attack_route_pre.tcl` | The SWIG-bound destroy is on the base class: use `odb::dbProperty_destroy` (already patched in this repo). |
+| Routing attack aborts with `Error: invalid command name "odb::dbBoolProperty_destroy"` | Outdated `routing_wm/attack_route_pre.tcl` | The SWIG-bound destroy is on the base class: use `odb::dbProperty_destroy` (already patched in this repo). |
 | Routing attack aborts with `Error: invalid command name "attack_route_pre"` | `[attack_route_pre]` inside a Tcl double-quoted `puts` triggers command substitution | The TCL prefix should be a bare string (already patched). |
 | Routing attack aborts with `[ERROR GUI-0077] QStandardPaths: error creating runtime directory '/run/user/<uid>'` at `final_report.tcl:82` | The optional GUI snapshot step needs writable `$XDG_RUNTIME_DIR`, which is read-only inside the Singularity image | `final_report.tcl` now wraps `gui::show` in `catch`; the snapshot warning is non-fatal. |
 | Targeted-routing JSON has `auc=`, `precision_at_recall=` empty but `recall_top_K` populated | Single-class labels (typically placement embed CSVs that contain only accepted constraints) | Expected — `[targeted] single-class labels …` is logged.  The recall-at-top-K diagnostic still indicates whether the margin-based ranking concentrates positives at the top. |
@@ -812,7 +813,7 @@ Symptoms you may see and what they mean:
 ## 6. Full pipeline (one shot)
 
 ```bash
-cd OR0415/OpenROAD-flow-scripts/flow/watermarking/experiments
+cd "$ORFS_FLOW_HOME"/watermarking/experiments
 
 # ── Phase 1 ──────────────────────────────────────────────────────────────────
 # 1a. Run all watermarked flows (hours; run overnight or in parallel)
@@ -890,14 +891,14 @@ By default `find_latest_wm_variant()` picks the most recently completed run
 
 | Module | Environment variable |
 |---|---|
-| `place_ordering` | `WM_VARIANT_PLACE_ORDERING` |
-| `cts_v2` | `WM_VARIANT_CTS_V2` |
-| `routing_wrong_way` | `WM_VARIANT_ROUTING_WRONG_WAY` |
+| `placement_wm` | `WM_VARIANT_PLACEMENT_WM` |
+| `cts_wm` | `WM_VARIANT_CTS_WM` |
+| `routing_wm` | `WM_VARIANT_ROUTING_WM` |
 
 Example — pin the routing variant and use an alternate flow root:
 ```bash
 ORFS_FLOW_HOME=/scratch/orfs/flow \
-WM_VARIANT_ROUTING_WRONG_WAY=pdmarks-r-only-20240510_143000 \
+WM_VARIANT_ROUTING_WM=pdmarks-r-only-20240510_143000 \
 python3.11 phase1_ppa.py
 ```
 
@@ -1059,7 +1060,7 @@ Override for every design with `export BASELINE_K=<int>`.
 ### Baseline runbook
 
 ```bash
-cd OR0415/OpenROAD-flow-scripts/flow/watermarking/experiments
+cd "$ORFS_FLOW_HOME"/watermarking/experiments
 
 # 1. Run all 5 baselines × 8 paper designs = 40 flows (detached; hours)
 nohup bash run_baselines_all.sh > logs/baselines_all.log 2>&1 &
@@ -1103,5 +1104,3 @@ Checkpoint→ODB: placement baselines use `3_place_<suffix>.odb` / `4_cts.odb` /
 AutoMarks whose region heuristic was too small). The table is hand-built into
 `tab:survival_baseline` in main.tex from this CSV.
 
-<!-- /home/yil375/.claude/projects/-home-fetzfs-projects-MISC-ytliu-watermarking/3560d185-3505-4d4d-8deb-712b9c904224.json
--->

@@ -99,7 +99,7 @@ instance identities** must match the pre-move signature or the move is reverted
 ## Usage
 
 ```bash
-cd .../flow/watermarking/cts_v2
+cd "$ORFS_FLOW_HOME"/watermarking/cts_wm
 chmod +x run_cts_wm.sh run_verify_stages.sh run_ppa.sh cts_wm.sh
 
 # 1) Embed + self-verify (also ensures gen_key/ produced seed_cts.hex).

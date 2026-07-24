@@ -76,7 +76,7 @@ are candidates (“nearly free” permutations).
 ## Quick start
 
 ```bash
-cd .../watermarking/place_ordering
+cd "$ORFS_FLOW_HOME"/watermarking/placement_wm
 chmod +x *.sh
 ./run_place_wm.sh        # produces 3_place_order_wm.odb + wm_place_order_embed.csv
 ./run_ppa.sh             # optional: flow continues from watermarked placement
