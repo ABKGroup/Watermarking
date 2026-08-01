@@ -43,7 +43,7 @@ import openroad as ord_
 
 _HERE = Path(__file__).resolve().parent
 _WM_ROOT = _HERE.parents[2]
-sys.path.insert(0, str(_WM_ROOT / "cts_v2"))
+sys.path.insert(0, str(_WM_ROOT / "cts_wm"))
 import cts_watermark_common as cc  # type: ignore
 
 

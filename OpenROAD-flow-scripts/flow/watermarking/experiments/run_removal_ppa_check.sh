@@ -2,15 +2,14 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # For each NG45 design: surgically reroute ONLY the watermark nets (keeping the
-# layout), then (1) dump route_counts on the rerouted layout to re-measure the
-# routing-watermark statistic Z_R/p_R (removal check) and (2) do-finish for
+# layout), then (1) dump route_qr on the rerouted layout to re-measure the
+# routing-watermark statistic T_R/p_R (removal check) and (2) do-finish for
 # post-route PPA (degradation check).  Compares to the watermarked baseline.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; cd "$HERE"
-FLOW_HOME="$(cd "$HERE/../.." && pwd)"; WM="$FLOW_HOME/watermarking"
-SIF="${SINGULARITY_SIF:-/home/tool/singularity/images/ispd26.sif}"
-OPENROAD_EXE="${OPENROAD_EXE:-$FLOW_HOME/../../OpenROAD/build/bin/openroad}"
-TCL="$WM/routing_wrong_way/reroute_experiment.tcl"
+source "$HERE/../wm_env.sh"
+WM="$WM_HOME"
+TCL="$WM/routing_wm/reroute_experiment.tcl"
 THREADS="${THREADS:-$(nproc)}"
 OUTB="$HERE/results/phase3/removal_check"; mkdir -p "$OUTB"
 
@@ -33,25 +32,24 @@ for row in "${ROWS[@]}"; do
   echo "===== $nick : surgical full-watermark reroute  $(date '+%H:%M:%S') ====="
 
   # 1) surgical reroute (reroute ALL watermark nets, keep the rest FIXED)
-  singularity exec -B /home -B /tmp -e "$SIF" env \
+  wm_exec env \
     MODE=surgical WM_ODB="$(readlink -f "$IN")" WM_OUT_ODB="$OUT_ODB" \
     WM_NETS_OUT="$OD/wm_nets.txt" \
     "$OPENROAD_EXE" -exit -threads "$THREADS" "$TCL" > "$OD/surgical.log" 2>&1
   [ -f "$OUT_ODB" ] || { echo "[err] $nick surgical produced no ODB"; continue; }
   echo "  rerouted -> $(grep -oE 'reroute_nets=[0-9]+' "$OD/surgical.log" | tail -1)"
 
-  # 2) route_counts on the rerouted layout (removal check)
-  WM_ODB="$(readlink -f "$OUT_ODB")" WM_COUNTS_CSV="$OD/route_counts_surgical.csv" \
-    OPENROAD_EXE="$OPENROAD_EXE" bash "$HERE/tools/dump_route_counts.sh" \
+  # 2) route_qr on the rerouted layout (removal check)
+  WM_ODB="$(readlink -f "$OUT_ODB")" WM_QR_CSV="$OD/route_qr_surgical.csv" \
+    OPENROAD_EXE="$OPENROAD_EXE" bash "$HERE/tools/dump_route_qr.sh" \
     > "$OD/dump_surgical.log" 2>&1 \
-    && echo "  route_counts -> $OD/route_counts_surgical.csv" \
-    || echo "  [warn] route_counts dump failed (see $OD/dump_surgical.log)"
+    && echo "  route_qr -> $OD/route_qr_surgical.csv" \
+    || echo "  [warn] route_qr dump failed (see $OD/dump_surgical.log)"
 
   # 3) do-finish for PPA (density-fill + STA + power) inside singularity
   cp -f "$HERE/results/nangate45/$nick/pdmarks-all-stage/5_route.sdc" \
         "$ODIR/5_route.sdc" 2>/dev/null || echo "  [warn] no 5_route.sdc to copy"
-  singularity exec -B /home -B /tmp -e "$SIF" env \
-    PROJ_DIR="/home/fetzfs_projects/MISC-ytliu/watermarking" \
+  wm_exec env \
     OPENROAD_EXE="$OPENROAD_EXE" FLOW_HOME="$FLOW_HOME" \
     EXPERIMENTS_HOME="$HERE" WM_RESULTS_HOME="$HERE/results" \
     DESIGN="$design" DESIGN_NICKNAME="$nick" PLATFORM="nangate45" \

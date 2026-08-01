@@ -90,22 +90,21 @@ def render_ppa(csv_path: Path, out_path: Path) -> None:
     """Render Table V (PPA overhead) rows in paper order.
 
     Paper row order:
-      Kahng        -- left blank (not implemented)
-      Cell-scattering
-      Buffer-insertion
-      ICMarks      -- left blank (not implemented)
-      AutoMarks    -- left blank (not implemented)
-      P-only  }
-      C-only  }  PDMarks variants
-      R-only  }
+      Row-parity       }
+      Buffer-insertion }  prior-work baselines
+      ICMarks          }
+      P-only    }
+      C-only    }  PDMarks variants
+      R-only    }
       All-stage }
+
+    Rows with no data in the CSV are emitted blank so the table keeps its
+    shape when only a subset of methods has been run.
     """
     METHODS = (
-        "Kahng",             # blank -- not implemented
-        "Cell-scattering",
+        "Row-parity",
         "Buffer-insertion",
-        "ICMarks",           # blank -- not implemented
-        "AutoMarks",         # blank -- not implemented
+        "ICMarks",
         "P-only",
         "C-only",
         "R-only",
@@ -156,7 +155,7 @@ def render_survival(csv_path: Path, out_path: Path) -> None:
         for b in ACTIVE_BENCHES:
             evidences = ["r_P", "r_C"]
             if b.platform == "nangate45":
-                evidences.append("Z_R,p_R")
+                evidences.append("T_R,p_R")
             evidences.append("r_all")
             for evidence in evidences:
                 cells = [b.paper_label, evidence]
@@ -209,10 +208,10 @@ def render_sensitivity(csv_path: Path, out_path: Path) -> None:
     a knob block).
 
     Columns: stage, knob, value, platform, eligible, selected,
-             r_P/r_C/Z_R, r_all, dWNS_vs_ref, dTNS_vs_ref,
+             r_P/r_C/T_R, r_all, dWNS_vs_ref, dTNS_vs_ref,
              dRWL_vs_ref, dPower_vs_ref.
 
-    For routing rows, ``r_X`` is reported as ``Z_R``; for placement /
+    For routing rows, ``r_X`` is reported as ``T_R``; for placement /
     CTS, the corresponding r_P or r_C.  Other r columns blank.
     """
     rows = list(csv.DictReader(open(csv_path)))
@@ -234,7 +233,7 @@ def render_sensitivity(csv_path: Path, out_path: Path) -> None:
             elif stage == "cts":
                 r_x = _fmt(r.get("r_C"))
             elif stage == "routing":
-                r_x = _fmt(r.get("Z_R"))
+                r_x = _fmt(r.get("T_R"))
             else:
                 r_x = "--"
             cells = [
@@ -253,7 +252,7 @@ def render_sensitivity(csv_path: Path, out_path: Path) -> None:
 
 
 def render_attack(csv_path: Path, out_path: Path,
-                  fields: tuple = ("r_P", "r_C", "Z_R", "p_R"),
+                  fields: tuple = ("r_P", "r_C", "T_R", "p_R"),
                   stages: tuple = ("placement", "cts", "routing"),
                   ppa_csv: Optional[Path] = None,
                   ppa_stage_map: Optional[dict] = None,
@@ -366,7 +365,7 @@ def main() -> int:
         # targeted_{placement,cts,routing}).
         render_attack(root / "phase3" / "targeted.csv",
                       root / "phase3" / "tab_targeted_attack.tex",
-                      fields=("r_P", "r_C", "Z_R", "p_R", "r_all", "accept"),
+                      fields=("r_P", "r_C", "T_R", "p_R", "r_all", "accept"),
                       ppa_csv=blind_ppa_csv,
                       ppa_stage_map={"placement": "targeted_placement",
                                      "cts":       "targeted_cts",

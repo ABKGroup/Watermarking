@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Full-flow watermark survival for the 5 prior-work baselines (tab:survival_baseline).
 
@@ -9,7 +9,7 @@ re-runs.  The reported metric is the extraction rate r = accepted / K, the same
 quantity as the PDMarks r_P / r_C rows in tab:survival.
 
 Checkpoint -> ODB (under experiments/results/<plat>/<nick>/baseline-<m>/):
-  placement baselines (kahng, cell_scattering, icmarks, automarks):
+  placement baselines (row_parity, icmarks):
     post_place 3_place_<suffix>.odb   post_cts 4_cts.odb
     post_grt   5_1_grt.odb            post_drt 5_route.odb
   buffer_insertion (CTS-stage): post_place n/a; post_cts 4_cts_bufins.odb;
@@ -17,18 +17,19 @@ Checkpoint -> ODB (under experiments/results/<plat>/<nick>/baseline-<m>/):
 
 Writes results/phase1/baseline_survival.csv (appended/upserted per cell).
 Usage:
-  python3.11 baseline_survival.py                       # all 5 methods
-  python3.11 baseline_survival.py --methods buffer_insertion
+  python3 baseline_survival.py                          # all methods
+  python3 baseline_survival.py --methods buffer_insertion
 """
 from __future__ import annotations
 import argparse, csv, os, re, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from lib import orexec
+
 RESULTS = HERE / "results"
 OUT_CSV = RESULTS / "phase1" / "baseline_survival.csv"
-OR = "/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD/build/bin/openroad"
-SIF = os.environ.get("SINGULARITY_SIF", "/home/tool/singularity/images/ispd26.sif")
 
 # 8 paper designs: (platform, nickname)
 BENCHES = [
@@ -39,11 +40,9 @@ BENCHES = [
 ]
 # method -> (verify_dir, variant_dir, embed_csv, place_odb_suffix or None for CTS-stage)
 METHODS = {
-    "kahng":            ("kahng",            "baseline-kahng",       "kahng_embed.csv",            "kahng"),
-    "cell_scattering":  ("cell_scattering",  "baseline-cellscatter", "cell_scattering_embed.csv",  "cellscatter"),
-    "icmarks":          ("icmarks",          "baseline-icmarks",     "icmarks_embed.csv",          "icmarks"),
-    "automarks":        ("automarks",        "baseline-automarks",   "automarks_embed.csv",        "automarks"),
-    "buffer_insertion": ("buffer_insertion", "baseline-bufins",      "buffer_insertion_embed.csv", None),
+    "row_parity":       ("row_parity",       "baseline-row-parity", "row_parity_embed.csv",       "row_parity"),
+    "icmarks":          ("icmarks",          "baseline-icmarks",    "icmarks_embed.csv",          "icmarks"),
+    "buffer_insertion": ("buffer_insertion", "baseline-bufins",     "buffer_insertion_embed.csv", None),
 }
 CHECKPOINTS = ["post_place", "post_cts", "post_grt", "post_drt"]
 _KA = re.compile(r"K=(\d+)\s+accepted=(\d+)")
@@ -67,10 +66,10 @@ def run_verify(method, vdir, rdir, embed_csv, odb_name, ckpt):
     if not odb.exists() or not emb.exists():
         return None
     out_csv = rdir / f"survival_{method}_{ckpt}.csv"
-    cmd = ["singularity", "exec", "-B", "/home", "-B", "/tmp", "-e", SIF,
-           OR, "-python", "-exit", str(HERE / "baselines" / vdir / "verify.py"),
-           "--odb", str(odb), "--embed-csv", str(emb),
-           "--stage", ckpt, "--out-csv", str(out_csv)]
+    cmd = orexec.openroad_python(
+        HERE / "baselines" / vdir / "verify.py",
+        "--odb", str(odb), "--embed-csv", str(emb),
+        "--stage", ckpt, "--out-csv", str(out_csv))
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
     except subprocess.TimeoutExpired:
@@ -79,7 +78,7 @@ def run_verify(method, vdir, rdir, embed_csv, odb_name, ckpt):
     m = _KA.search(blob)
     if not m:
         # Embedder committed no surviving claims for this design -> nothing to
-        # verify (e.g. AutoMarks whose heuristic region was too small).  This is
+        # verify (e.g. a region heuristic that was too small).  This is
         # a real "no watermark embedded" outcome, not a parse error.
         if "nothing to verify" in blob:
             return {"note": "no_claims"}

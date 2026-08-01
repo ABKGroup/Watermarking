@@ -22,8 +22,8 @@
 # already has the corresponding CSV on disk.
 #
 # After this finishes, run:
-#     python3.11 phase1_capacity.py
-#     python3.11 aggregate.py --what capacity
+#     python3 phase1_capacity.py
+#     python3 aggregate.py --what capacity
 # to re-derive tab:capacity.
 set -euo pipefail
 
@@ -31,8 +31,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLOW_HOME="$(cd "${HERE}/../.." && pwd)"
 EXPERIMENTS_HOME="${EXPERIMENTS_HOME:-${HERE}}"
 WM_RESULTS_HOME="${WM_RESULTS_HOME:-${EXPERIMENTS_HOME}/results}"
-PLACE="${FLOW_HOME}/watermarking/place_ordering"
-CTS="${FLOW_HOME}/watermarking/cts_v2"
+PLACE="${FLOW_HOME}/watermarking/placement_wm"
+CTS="${FLOW_HOME}/watermarking/cts_wm"
 EMBED_FLOW_VARIANT="${FLOW_VARIANT:-${PHASE1_EMBED_FLOW_VARIANT:-pdmarks-embed-only}}"
 
 echo "[info] embed FLOW_VARIANT=${EMBED_FLOW_VARIANT}"
@@ -119,6 +119,6 @@ echo "${BENCHES}" | while read -r _PLAT _DSGN _VAR; do
 done
 
 echo "[done] embed runs complete; refresh tab:capacity with:"
-echo "       python3.11 ${HERE}/phase1_capacity.py && \\"
-echo "       python3.11 ${HERE}/aggregate.py --what capacity && \\"
-echo "       python3.11 ${HERE}/render_tex.py"
+echo "       python3 ${HERE}/phase1_capacity.py && \\"
+echo "       python3 ${HERE}/aggregate.py --what capacity && \\"
+echo "       python3 ${HERE}/render_tex.py"

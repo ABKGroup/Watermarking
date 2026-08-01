@@ -84,7 +84,7 @@ def _buf_master_name(platform: str) -> str:
 # Python (`from odb import dbSigType` raises ImportError, same as
 # dbPlacementStatus).  The getSigType()/getIoType() accessors return objects
 # whose str() yields "CLOCK"/"POWER"/"OUTPUT"/... so we compare as strings,
-# matching the working PDMarks code in cts_v2/place_ordering.
+# matching the working PDMarks code in cts_wm/placement_wm.
 
 def _is_clock_net(net) -> bool:
     """True if net carries a clock signal (SigType == CLOCK)."""

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Plot wrong-key verification distributions.
 

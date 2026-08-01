@@ -324,7 +324,7 @@ def main() -> int:
     p.add_argument("--grid-ny", type=int, default=int(os.environ.get("WM_GRID_NY", "8")))
     p.add_argument(
         "--pair-dist-um", type=float,
-        default=float(os.environ.get("WM_PAIR_DIST_UM", "5")),
+        default=float(os.environ.get("WM_PAIR_DIST_UM", "1")),
     )
     p.add_argument(
         "--pairs-per-tile", type=int,
@@ -336,7 +336,7 @@ def main() -> int:
     )
     p.add_argument(
         "--use-groups", type=int,
-        default=int(os.environ.get("WM_USE_GROUPS", "1")),
+        default=int(os.environ.get("WM_USE_GROUPS", "0")),
     )
     p.add_argument(
         "--hpwl-eps-pair-dbu", type=int,
@@ -431,8 +431,16 @@ def main() -> int:
         default=int(os.environ.get("WM_HPWL_EPS_PAIR_RELAXED_DBU", "200")),
     )
     p.add_argument("--sdc", default=os.environ.get("WM_SDC", ""))
-    p.add_argument("--max-disp-micron", type=float, nargs=2, metavar=("X", "Y"), default=None)
-    p.add_argument("--message", default=os.environ.get("WM_MESSAGE", ""))
+    p.add_argument(
+        "--max-disp-x-um", type=float,
+        default=float(os.environ.get("WM_MAX_DISP_X", "5")),
+        help="Incremental DPL max displacement in x (microns)",
+    )
+    p.add_argument(
+        "--max-disp-y-um", type=float,
+        default=float(os.environ.get("WM_MAX_DISP_Y", "5")),
+        help="Incremental DPL max displacement in y (microns)",
+    )
     args = p.parse_args(wc.argv_after_openroad_driver())
 
     if not args.input or not args.output_odb:
@@ -996,13 +1004,8 @@ def main() -> int:
     neighbor_min_slack = {}
 
     dpl = design.getOpendp()
-    if args.max_disp_micron is None:
-        mx = float(os.environ.get("WM_MAX_DISP_X", "5"))
-        my = float(os.environ.get("WM_MAX_DISP_Y", "5"))
-    else:
-        mx, my = float(args.max_disp_micron[0]), float(args.max_disp_micron[1])
-    max_disp_x = max(1, int(design.micronToDBU(mx) / sw))
-    max_disp_y = max(1, int(design.micronToDBU(my) / sh))
+    max_disp_x = max(1, int(design.micronToDBU(args.max_disp_x_um) / sw))
+    max_disp_y = max(1, int(design.micronToDBU(args.max_disp_y_um) / sh))
     t_phase = time.time()
     _log(
         f"running incremental detailedPlacement max_disp_x={max_disp_x} sites "
@@ -1051,8 +1054,6 @@ def main() -> int:
             w.writerows(csv_rows)
         _log(f"cell list -> {args.output_cell_list}")
 
-    if args.message:
-        _log(f"message tag: {args.message!r}")
     _log(f"write outputs done in {time.time() - t_phase:.2f}s")
     _log("done")
 

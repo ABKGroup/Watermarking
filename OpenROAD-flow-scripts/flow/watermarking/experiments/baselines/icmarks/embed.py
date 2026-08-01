@@ -30,7 +30,7 @@ model and the same Pc accounting:
   4. detailed_placement() to legalize, then re-read parities.
 
 Verification is parity-based on the DW axis, matching the Pc = 0.5^K
-convention used by cell_scattering / buffer_insertion / Kahng. GW gives an
+convention used by row_parity / buffer_insertion. GW gives an
 additional "region containment" rate that we log alongside Pc but do not
 fold into Pc, since the table in the PDMarks paper uses a single Pc per
 method row.
@@ -73,7 +73,7 @@ def _log(msg: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Eligibility / geometry helpers (same gate as cell_scattering for parity)
+# Eligibility / geometry helpers (same gate as row_parity for parity)
 # ---------------------------------------------------------------------------
 
 def _is_buffer_or_clock(inst) -> bool:

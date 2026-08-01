@@ -42,11 +42,11 @@ _REPAIR_NAME_HINTS = (
 _CLKBUF_HINTS = ("CLKBUF", "CLKINV", "CLKGATE", "CTSBUF")
 
 
-# Wire the eligibility module + cts_v2 helpers onto sys.path.
+# Wire the eligibility module + cts_wm helpers onto sys.path.
 _HERE = Path(__file__).resolve()
 _WM_ROOT = _HERE.parents[3]
 _EXP_DIR = _WM_ROOT / "experiments"
-sys.path.insert(0, str(_WM_ROOT / "cts_v2"))
+sys.path.insert(0, str(_WM_ROOT / "cts_wm"))
 sys.path.insert(0, str(_EXP_DIR))
 sys.path.insert(0, str(_EXP_DIR / "lib"))
 

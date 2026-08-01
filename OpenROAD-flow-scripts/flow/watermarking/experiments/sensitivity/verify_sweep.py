@@ -1,16 +1,16 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Per-cell verifier for the parameter-sensitivity sweep.
 
 After ``run_sensitivity.sh`` has produced an embed + PPA continuation for
 every ``sens-<stage>-<knob>-<value>`` variant, this script walks those
 output dirs and computes the per-stage extraction rate (``r_P`` / ``r_C``
-for placement / CTS, ``Z_R`` / ``p_R`` for routing).  Routing dumps the
-per-net wrong-way counts via ``tools/dump_route_counts.sh`` and runs the
-two-proportion z-test using the design's owner key.
+for placement / CTS, ``T_R`` / ``p_R`` for routing).  Routing dumps the
+per-net wrong-way wirelength via ``tools/dump_route_qr.sh`` and runs the
+net-level randomization test using the design's owner key.
 
 Outputs ``results/phase2/raw/sens_<stage>_<knob>_<value>_<plat>_<design>.json``
-with: platform, design, stage, knob, value, variant, r_P, r_C, Z_R, p_R, note.
+with: platform, design, stage, knob, value, variant, r_P, r_C, T_R, p_R, note.
 
 Aggregator then joins those JSONs into ``sensitivity.csv`` together with
 the eligible/selected counts (already extracted from embed logs) and the
@@ -33,18 +33,12 @@ from bench_matrix import SENSITIVITY_BENCHES
 from lib.keys import load_seed_hex
 from lib.keyless_verify import routing_wm_set
 from lib.orfs import FLOW_HOME, experiment_results
-from lib.route_stat import read_counts_csv, route_stat_from_counts
+from lib.route_stat import per_net_qr, route_stat_from_qr
 # Reuse the existing verify-CSV parsers from the blind-attack driver.
 from attacks.blind.run_blind_attack import (
     _parse_placement_verify, _parse_cts_verify,
 )
 
-
-OPENROAD_EXE = os.environ.get(
-    "OPENROAD_EXE",
-    "/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD/build/bin/openroad")
-SIF = os.environ.get("SINGULARITY_SIF",
-                     "/home/tool/singularity/images/ispd26.sif")
 
 RAW_OUT = HERE / "results" / "phase2" / "raw"
 RAW_OUT.mkdir(parents=True, exist_ok=True)
@@ -77,7 +71,7 @@ def _verify_placement(b, variant: str) -> dict:
         return {"r_P": None,
                 "note": f"missing embed artifacts under {rdir}"}
     v_csv = RAW_OUT / f"verify_p_{b.platform}_{b.design}_{variant}.csv"
-    sh = FLOW_HOME / "watermarking" / "place_ordering" / "place_wm.sh"
+    sh = FLOW_HOME / "watermarking" / "placement_wm" / "place_wm.sh"
     log = RAW_OUT / f"verify_p_{b.platform}_{b.design}_{variant}.log"
     rc = subprocess.run(
         ["bash", str(sh), "verify_stages"],
@@ -103,7 +97,7 @@ def _verify_cts(b, variant: str) -> dict:
         return {"r_C": None,
                 "note": f"missing embed artifacts under {rdir}"}
     v_csv = RAW_OUT / f"verify_c_{b.platform}_{b.design}_{variant}.csv"
-    sh = FLOW_HOME / "watermarking" / "cts_v2" / "cts_wm.sh"
+    sh = FLOW_HOME / "watermarking" / "cts_wm" / "cts_wm.sh"
     log = RAW_OUT / f"verify_c_{b.platform}_{b.design}_{variant}.log"
     rc = subprocess.run(
         ["bash", str(sh), "verify"],
@@ -120,31 +114,31 @@ def _verify_cts(b, variant: str) -> dict:
 
 
 def _verify_routing(b, variant: str, value: str, knob: str) -> dict:
-    """Dump per-net counts on the routed ODB and run the two-proportion
-    z-test against the keyed WM-net set."""
+    """Dump per-net q_R on the routed ODB and run the net-level randomization
+    test against the keyed WM-net set."""
     rdir = experiment_results(b.platform, b.design_nickname, variant)
     routed = rdir / "5_route.odb"
     if not routed.exists():
-        return {"Z_R": None, "p_R": None,
+        return {"T_R": None, "p_R": None,
                 "note": f"no 5_route.odb under {rdir}"}
-    counts_csv = RAW_OUT / f"counts_r_{b.platform}_{b.design}_{variant}.csv"
-    dump_log   = RAW_OUT / f"counts_r_{b.platform}_{b.design}_{variant}.log"
-    sh = HERE / "tools" / "dump_route_counts.sh"
+    qr_csv   = RAW_OUT / f"qr_r_{b.platform}_{b.design}_{variant}.csv"
+    dump_log = RAW_OUT / f"qr_r_{b.platform}_{b.design}_{variant}.log"
+    sh = HERE / "tools" / "dump_route_qr.sh"
     subprocess.run([str(sh)],
                    env={**os.environ,
-                        "WM_ODB":        str(routed),
-                        "WM_COUNTS_CSV": str(counts_csv)},
+                        "WM_ODB":    str(routed),
+                        "WM_QR_CSV": str(qr_csv)},
                    stdout=open(dump_log, "w"),
                    stderr=subprocess.STDOUT, check=False)
-    if not counts_csv.exists():
-        return {"Z_R": None, "p_R": None,
-                "note": f"dump_route_counts produced no CSV (log={dump_log})"}
+    if not qr_csv.exists():
+        return {"T_R": None, "p_R": None,
+                "note": f"dump_route_qr produced no CSV (log={dump_log})"}
     seed_path = FLOW_HOME / "watermarking" / "gen_key" / "out" / b.design / "seed_routing.hex"
     if not seed_path.exists():
-        return {"Z_R": None, "p_R": None,
+        return {"T_R": None, "p_R": None,
                 "note": f"missing seed_routing.hex at {seed_path}"}
     sr = load_seed_hex(seed_path)
-    counts = read_counts_csv(counts_csv)
+    counts = per_net_qr(qr_csv)
     # The owner verifier uses the *attack's* watermark fraction value for
     # the WM-net reconstruction.  For the f-sweep we want the sweep value;
     # for the lambda_wm sweep we keep the default fraction (matches embed).
@@ -153,8 +147,8 @@ def _verify_routing(b, variant: str, value: str, knob: str) -> dict:
     except ValueError:
         fraction = 0.05
     wm = routing_wm_set(sr, counts.keys(), fraction)
-    st = route_stat_from_counts(counts, wm)
-    return {"Z_R": st.Z_R, "p_R": st.p_R, "note": ""}
+    st = route_stat_from_qr(counts, wm, b.design)
+    return {"T_R": st.T_R, "p_R": st.p_R, "note": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +184,7 @@ def main() -> int:
                    "stage": stage, "knob": knob, "value": value,
                    "variant": variant,
                    "r_P": None, "r_C": None,
-                   "Z_R": None, "p_R": None,
+                   "T_R": None, "p_R": None,
                    "note": ""}
             if stage == "placement":
                 rec.update(_verify_placement(b, variant))
@@ -203,7 +197,7 @@ def main() -> int:
             out.write_text(json.dumps(rec, indent=2, default=str))
             print(f"[verify_sweep] {variant} {b.platform}/{b.design}: "
                   f"r_P={rec.get('r_P')}  r_C={rec.get('r_C')}  "
-                  f"Z_R={rec.get('Z_R')}  p_R={rec.get('p_R')}  "
+                  f"T_R={rec.get('T_R')}  p_R={rec.get('p_R')}  "
                   f"{rec.get('note','')}")
     return 0
 

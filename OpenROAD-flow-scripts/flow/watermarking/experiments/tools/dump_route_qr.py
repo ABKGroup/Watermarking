@@ -3,7 +3,7 @@
 wirelength (paper Eq. eq:routing_net_fraction) plus observable geometric
 features used by the targeted-attack classifier.
 
-This replaces tools/dump_route_counts.py, whose per-net *segment counts* are
+Wirelength is used rather than per-net *segment counts*, which are
 representation-dependent (splitting/merging collinear route records changes
 them).  Here, for each signal net we canonicalize the routed geometry by
 merging overlapping/contiguous collinear wire intervals on the same routing

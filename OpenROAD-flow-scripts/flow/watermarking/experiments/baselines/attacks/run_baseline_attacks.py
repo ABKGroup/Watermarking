@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Baseline attack-robustness sweep (blind + targeted), mirroring PDMarks
 §7.1/§7.2 so the methods are compared apples-to-apples.
@@ -34,24 +34,16 @@ from typing import Optional, Tuple
 HERE = Path(__file__).resolve().parents[2]                  # .../experiments
 sys.path.insert(0, str(HERE))
 from bench_matrix import ACTIVE_BENCHES
+from lib import orexec
 from lib.orfs import experiment_results
 
-OPENROAD_EXE = os.environ.get(
-    "OPENROAD_EXE",
-    "/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD/build/bin/openroad")
-SIF = os.environ.get("SINGULARITY_SIF", "/home/tool/singularity/images/ispd26.sif")
-SINGULARITY = shutil.which("singularity") or "/usr/local/bin/singularity"
 SKLEARN_PY = os.environ.get("WM_SKLEARN_PY", "python3")
 
 BL = {
-    "cell_scattering": dict(dir="baseline-cellscatter", odb="3_place_cellscatter.odb",
-                            csv="cell_scattering_embed.csv", summary="CELLSCATTER_VERIFY"),
-    "kahng":           dict(dir="baseline-kahng", odb="3_place_kahng.odb",
-                            csv="kahng_embed.csv", summary="KAHNG_VERIFY"),
+    "row_parity":      dict(dir="baseline-row-parity", odb="3_place_row_parity.odb",
+                            csv="row_parity_embed.csv", summary="ROW_PARITY_VERIFY"),
     "icmarks":         dict(dir="baseline-icmarks", odb="3_place_icmarks.odb",
                             csv="icmarks_embed.csv", summary="ICMARKS_VERIFY"),
-    "automarks":       dict(dir="baseline-automarks", odb="3_place_automarks.odb",
-                            csv="automarks_embed.csv", summary="AUTOMARKS_VERIFY"),
     "buffer_insertion": dict(dir="baseline-bufins", odb="4_cts_bufins.odb",
                              csv="buffer_insertion_embed.csv", summary="BUFINS_VERIFY"),
 }
@@ -59,8 +51,7 @@ BASELINES_DIR = HERE / "baselines"
 
 
 def or_run(script: Path, env: dict, log: Optional[Path] = None) -> int:
-    cmd = [SINGULARITY, "exec", "-B", "/home", SIF, OPENROAD_EXE,
-           "-python", "-exit", str(script)]
+    cmd = orexec.openroad_python(script)
     e = {**os.environ, **env}
     if log is None:
         return subprocess.run(cmd, env=e).returncode
@@ -75,9 +66,8 @@ _SUM_RX = re.compile(r"K=(\d+)\s+accepted=(\d+)\s+Pc=([0-9.eE+-]+)")
 def run_verify(method, odb, embed_csv, log: Path) -> Tuple[Optional[float], Optional[int], Optional[float]]:
     """Run the baseline's verify.py on `odb`; return (r, K, Pc)."""
     vscript = BASELINES_DIR / method / "verify.py"
-    cmd = [SINGULARITY, "exec", "-B", "/home", SIF, OPENROAD_EXE, "-python", "-exit",
-           str(vscript), "--", "--odb", str(odb), "--embed-csv", str(embed_csv),
-           "--stage", "ATK"]
+    cmd = orexec.openroad_python(vscript, "--", "--odb", str(odb),
+                                 "--embed-csv", str(embed_csv), "--stage", "ATK")
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "w") as f:
         subprocess.run(cmd, env=os.environ, stdout=f, stderr=subprocess.STDOUT)

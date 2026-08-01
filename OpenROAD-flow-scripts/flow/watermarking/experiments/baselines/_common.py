@@ -14,15 +14,19 @@ import hashlib
 import hmac
 import os
 import struct
+import sys
 from pathlib import Path
 from typing import Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from wm_prf import load_seed_hex  # noqa: E402,F401
+
+# This file lives at <flow>/watermarking/experiments/baselines/_common.py, so
+# the ORFS flow root is four levels up.  FLOW_HOME / ORFS_FLOW_HOME override it.
 FLOW_HOME = Path(
-    os.environ.get(
-        "FLOW_HOME",
-        "/home/fetzfs_projects/MISC-ytliu/watermarking/"
-        "OR0415/OpenROAD-flow-scripts/flow",
-    )
+    os.environ.get("FLOW_HOME")
+    or os.environ.get("ORFS_FLOW_HOME")
+    or Path(__file__).resolve().parents[3]
 )
 
 # Fallback K when no embed CSV exists for a design.  Chosen to give P_c ~ 1e-14,
@@ -54,7 +58,7 @@ def capacity_for(platform: str, design: str, variant: str) -> int:
 
     rdir = FLOW_HOME / "results" / platform / design / variant
 
-    # 2. New-format embed CSV (place_ordering)
+    # 2. New-format embed CSV (placement_wm)
     p = rdir / "wm_place_order_embed_v2.csv"
     if p.exists():
         try:
@@ -91,7 +95,7 @@ def capacity_for(platform: str, design: str, variant: str) -> int:
 def hmac_u32(seed: bytes, domain: bytes, name: str) -> int:
     """Return a 32-bit score for (domain, name) keyed by seed.
 
-    Uses HMAC-SHA256 the same way as the PDMarks place_ordering PRF, but with
+    Uses HMAC-SHA256 the same way as the PDMarks placement_wm PRF, but with
     a different domain prefix so the baseline selections don't overlap.
     """
     msg = domain + b"\0" + name.encode("utf-8")
@@ -117,12 +121,6 @@ def target_bit(seed: bytes, domain: bytes, name: str) -> int:
     return d[0] & 1
 
 
-def load_seed_hex(path: Path) -> bytes:
-    raw = Path(path).read_text().strip().split()[0]
-    b = bytes.fromhex(raw)
-    if len(b) != 32:
-        raise ValueError(f"expected 32-byte seed in {path}, got {len(b)}")
-    return b
 
 
 def seeds_for(design: str, gen_key_dir: Optional[Path] = None) -> tuple[bytes, bytes]:

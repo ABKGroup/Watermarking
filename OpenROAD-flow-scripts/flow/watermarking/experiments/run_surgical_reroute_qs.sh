@@ -16,21 +16,19 @@ set -euo pipefail
 
 PLAT="${1:?platform}"; DESIGN="${2:?design}"; QS="${3:?q_s}"; ODB_IN="${4:-}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; cd "$HERE"
+source "$HERE/../wm_env.sh"
 export EXPERIMENTS_HOME="$HERE"
-FLOW_HOME="$(cd "$HERE/../.." && pwd)"
 WM="$FLOW_HOME/watermarking"
-SIF="${SINGULARITY_SIF:-/home/tool/singularity/images/ispd26.sif}"
-OPENROAD_EXE="${OPENROAD_EXE:-$FLOW_HOME/../../OpenROAD/build/bin/openroad}"
 
-# --- resolve owner routed ODB + route_counts (reuse run_blind helpers) --------
-read -r NICK WMFV RCIN ODB_RESOLVED < <(python3.11 - "$PLAT" "$DESIGN" <<'PY'
+# --- resolve owner routed ODB + route_qr (reuse run_blind helpers) ------------
+read -r NICK WMFV RCIN ODB_RESOLVED < <("$(wm_python)" - "$PLAT" "$DESIGN" <<'PY'
 import sys; sys.path.insert(0,"."); sys.path.insert(0,"attacks/blind")
 from bench_matrix import ACTIVE_BENCHES
-from run_blind_attack import _pick_embed_dir, _route_counts_csv
+from run_blind_attack import _pick_embed_dir, _route_qr_csv
 plat,design=sys.argv[1:3]
 b=next(x for x in ACTIVE_BENCHES if x.platform==plat and (x.design==design or x.design_nickname==design))
 ed,_,_,_,_=_pick_embed_dir(plat,b.design_nickname,b.wm_flow_variant)
-rc=_route_counts_csv(ed,b)
+rc=_route_qr_csv(ed,b)
 # owner watermarked routed ODB candidates
 import glob
 cands=[str(ed/"5_route.odb")]+sorted(glob.glob(f"results/{plat}/{b.design_nickname}/*route*/5_route.odb"))
@@ -40,8 +38,8 @@ PY
 )
 [ -n "$ODB_IN" ] || ODB_IN="$ODB_RESOLVED"
 [ -f "$ODB_IN" ] || { echo "ERROR: owner routed ODB not found (pass it as arg 4). tried: $ODB_RESOLVED"; exit 1; }
-[ "$RCIN" != "NONE" ] && [ -f "$RCIN" ] || { echo "ERROR: route_counts CSV not found for $PLAT/$DESIGN"; exit 1; }
-echo "[cfg] $PLAT/$DESIGN q_s=$QS  in_odb=$ODB_IN  route_counts=$RCIN"
+[ "$RCIN" != "NONE" ] && [ -f "$RCIN" ] || { echo "ERROR: route_qr CSV not found for $PLAT/$DESIGN"; exit 1; }
+echo "[cfg] $PLAT/$DESIGN q_s=$QS  in_odb=$ODB_IN  route_qr=$RCIN"
 
 VAR="atk-surgical-$DESIGN-qs$QS"
 OUTDIR="results/$PLAT/$NICK/$VAR"; mkdir -p "$OUTDIR"
@@ -51,16 +49,16 @@ OUT_ODB="$OUTDIR/5_route.odb"
 # --- 1) pick the q_s% watermark attack nets ----------------------------------
 echo "[1/3] selecting q_s=$QS watermark nets ..."
 ATK_QS="$QS" WM_ROUTE_COUNTS_IN="$RCIN" WM_NETS_ATTACK_OUT="$NETS" \
-  python3.11 attacks/blind/attack_routing.py
+  "$(wm_python)" attacks/blind/attack_routing.py
 echo "      $(wc -l < "$NETS") nets selected -> $NETS"
 
 # --- 2) surgical reroute (preserve all else, reroute only watermark nets) ----
 echo "[2/3] surgical reroute inside singularity (preserve fixed, reroute marked) ..."
 NUM_CORES="${NUM_CORES:-$(nproc)}"
-singularity exec -B /home -B /tmp -e "$SIF" env \
+wm_exec env \
   WM_ODB="$(readlink -f "$ODB_IN")" WM_NETS_ATTACK="$(readlink -f "$NETS")" \
   WM_OUT_ODB="$(readlink -f "$OUT_ODB")" \
-  "$OPENROAD_EXE" -exit -threads "$NUM_CORES" "$WM/routing_wrong_way/surgical_reroute.tcl"
+  "$OPENROAD_EXE" -exit -threads "$NUM_CORES" "$WM/routing_wm/surgical_reroute.tcl"
 [ -f "$OUT_ODB" ] || { echo "ERROR: surgical reroute produced no ODB (see log above)"; exit 1; }
 
 # --- 3) finish (density-fill + final_report -> 6_report.json) INSIDE singularity
@@ -70,8 +68,7 @@ singularity exec -B /home -B /tmp -e "$SIF" env \
 echo "[3/3] density-fill + final_report for post-route PPA ..."
 cp -f "$(dirname "$ODB_IN")/5_route.sdc" "$OUTDIR/5_route.sdc" 2>/dev/null \
   || echo "[warn] could not copy 5_route.sdc from $(dirname "$ODB_IN")"
-singularity exec -B /home -B /tmp -e "$SIF" env \
-  PROJ_DIR="/home/fetzfs_projects/MISC-ytliu/watermarking" \
+wm_exec env \
   OPENROAD_EXE="$OPENROAD_EXE" FLOW_HOME="$FLOW_HOME" \
   EXPERIMENTS_HOME="$EXPERIMENTS_HOME" WM_RESULTS_HOME="$EXPERIMENTS_HOME/results" \
   DESIGN="$DESIGN" DESIGN_NICKNAME="$NICK" PLATFORM="$PLAT" \
@@ -81,7 +78,7 @@ singularity exec -B /home -B /tmp -e "$SIF" env \
       WORK_HOME='$EXPERIMENTS_HOME' do-finish" \
   || echo "[warn] do-finish failed; the rerouted 5_route.odb is at $OUT_ODB"
 
-python3.11 - "$PLAT" "$NICK" "$VAR" <<'PY'
+"$(wm_python)" - "$PLAT" "$NICK" "$VAR" <<'PY'
 import sys; sys.path.insert(0,".")
 from lib.orfs import load_experiment_metrics
 try:

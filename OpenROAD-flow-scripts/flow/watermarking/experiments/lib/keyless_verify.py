@@ -14,7 +14,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import hmac
-import struct
 import sys
 from pathlib import Path
 from typing import Iterable, Set, Tuple
@@ -22,8 +21,8 @@ from typing import Iterable, Set, Tuple
 # Delegate to the existing PRF implementations so we stay byte-for-byte
 # compatible with the embed-time selection.
 _WM_ROOT = Path(__file__).resolve().parents[2]  # flow/watermarking
-sys.path.insert(0, str(_WM_ROOT / "place_ordering"))
-sys.path.insert(0, str(_WM_ROOT / "cts_v2"))
+sys.path.insert(0, str(_WM_ROOT / "placement_wm"))
+sys.path.insert(0, str(_WM_ROOT / "cts_wm"))
 
 try:
     from watermark_common import (   # type: ignore
@@ -35,20 +34,16 @@ except Exception:
     _place_perm = None
 
 
-def _hmac_digest(seed: bytes, *parts: bytes) -> bytes:
-    """Length-prefixed HMAC-SHA256, byte-for-byte compatible with
-    cts_watermark_common.hmac_digest."""
-    h = hmac.new(seed, b"", hashlib.sha256)
-    for p in parts:
-        h.update(struct.pack(">I", len(p)))
-        h.update(p)
-    return h.digest()
+# The embedders' PRF, imported rather than reimplemented: verification only
+# works if both sides agree byte-for-byte.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from wm_prf import hmac_digest as _hmac_digest  # noqa: E402
 
 
 def _cts_pair_bits_inline(seed: bytes, pair_key: str,
                           l_a: str, l_b: str) -> Tuple[int, int]:
     """Inline replica of cts_watermark_common.pair_bits.  Avoids importing the
-    full cts_v2 module (which depends on ``odb`` at module-load time and can
+    full cts_wm module (which depends on ``odb`` at module-load time and can
     fail outside an OpenROAD-python interpreter)."""
     d = _hmac_digest(
         seed, b"pair",
@@ -128,7 +123,7 @@ def placement_extraction_rate(embed_csv: Path,
     per-pair observation is read from the embed CSV instead.
     """
     if _place_bit is None or _place_perm is None:
-        raise RuntimeError("place_ordering.watermark_common not importable")
+        raise RuntimeError("placement_wm.watermark_common not importable")
     _ = observed_csv  # accepted but unused; see docstring.
 
     big_x = 0

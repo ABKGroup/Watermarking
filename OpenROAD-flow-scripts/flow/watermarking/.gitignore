@@ -1,22 +1,21 @@
-# This repo holds the watermarking FRAMEWORK only.
-# All experimental output stays on the compute server, never in git.
+# This directory holds the watermarking FRAMEWORK only.
+# Flow outputs and key material stay on the machine that produced them.
 
-# Flow run artifacts (~463 GB on disk)
+# ORFS / experiment run artifacts
 logs/
 objects/
 reports/
 results/
 wm_log/
-backup/
 
-# Generated figures, tables and stray capture files
+# Generated figures and tables
 experiments/plots/
-experiments/node
 
-# Key material and derived watermark seeds — NEVER commit.
-# Regenerate locally with gen_key/gen_key.sh
+# Key material and derived watermark seeds -- NEVER commit.
+# Regenerate locally with gen_key/gen_key.sh (see gen_key/README.md).
 gen_key/keys/
 gen_key/out/
+gen_key/registry.json
 
 # Editor / OS noise
 .DS_Store

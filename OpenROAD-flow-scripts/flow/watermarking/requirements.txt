@@ -1,0 +1,15 @@
+# Python dependencies for the PDMarks watermarking framework.
+#   pip install -r requirements.txt
+#
+# The embedders and verifiers themselves run inside OpenROAD's bundled Python
+# and need nothing beyond the standard library plus `cryptography` (for the
+# Ed25519 key bundle).  The extras below are only needed for the experiment
+# harness under experiments/.
+
+# --- required by gen_key/ (Ed25519 signing) --------------------------------
+cryptography>=42          # PyNaCl is supported as a fallback backend
+
+# --- required by experiments/ ----------------------------------------------
+numpy>=1.24               # routing randomization test (lib/route_stat.py)
+scikit-learn>=1.3         # targeted-attack classifier (attacks/targeted/)
+matplotlib>=3.7           # figures (wrong_key/, attacks/blind/)

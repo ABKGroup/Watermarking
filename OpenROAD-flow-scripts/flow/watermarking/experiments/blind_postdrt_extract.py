@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Re-measure blind-attack placement/CTS extraction on the POST-DRT layout.
 
@@ -28,8 +28,8 @@ from run_blind_attack import (_pick_embed_dir, _parse_placement_verify,
 
 QS = ["0.1", "0.2", "0.5", "0.8", "1.0"]
 OUT = HERE / "results" / "phase3" / "blind_postdrt.csv"
-PLACE_SH = FLOW_HOME / "watermarking" / "place_ordering" / "place_wm.sh"
-CTS_SH = FLOW_HOME / "watermarking" / "cts_v2" / "cts_wm.sh"
+PLACE_SH = FLOW_HOME / "watermarking" / "placement_wm" / "place_wm.sh"
+CTS_SH = FLOW_HOME / "watermarking" / "cts_wm" / "cts_wm.sh"
 # 8 paper designs (skip AES, not in tab:blind_attack)
 PAPER = {("nangate45", "jpeg"), ("nangate45", "swerv_wrapper"),
          ("nangate45", "ariane136"), ("nangate45", "bp_multi_top"),

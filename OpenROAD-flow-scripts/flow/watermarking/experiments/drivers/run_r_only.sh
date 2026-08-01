@@ -4,7 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 ensure_keys
 
-ROUTE_DIR="${FLOW_HOME}/watermarking/routing_wrong_way"
+ROUTE_DIR="${FLOW_HOME}/watermarking/routing_wm"
 export FLOW_VARIANT="${FLOW_VARIANT:-pdmarks-r-only}"
 apply_adaptive_wm_params route
 

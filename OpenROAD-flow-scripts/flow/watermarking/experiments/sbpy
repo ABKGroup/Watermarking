@@ -1,13 +1,37 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: BSD-3-Clause
-# Tiny shim: run a python script in whatever environment has sklearn /
-# matplotlib / numpy.  Order of preference:
-#   1. If sklearn is importable by /usr/bin/python3.11, use that.
-#   2. Otherwise, hop into the singularity image (which we provisioned with
-#      scikit-learn 1.8 in the .local user site).
+#
+# Run a Python script under an interpreter that actually has the analysis
+# dependencies (numpy / scikit-learn / matplotlib).
+#
+# Resolution order:
+#   1. $WM_SKLEARN_PY, if set.
+#   2. The first python3.x on PATH that can import sklearn.
+#   3. Inside $SINGULARITY_SIF, if one is configured.
+#
+# Scripts that need no ML dependencies can just be run with python3 directly.
+
 set -euo pipefail
-if python3.11 -c "import sklearn" 2>/dev/null; then
-  exec python3.11 "$@"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${HERE}/../wm_env.sh"
+
+if [[ -n "${WM_SKLEARN_PY:-}" ]]; then
+  exec "${WM_SKLEARN_PY}" "$@"
 fi
-SIF="${SINGULARITY_SIF:-/home/tool/singularity/images/ispd26.sif}"
-exec singularity exec -B /home "${SIF}" python3 "$@"
+
+for cand in python3 python3.13 python3.12 python3.11 python3.10 python3.9; do
+  if command -v "${cand}" >/dev/null 2>&1 && \
+     "${cand}" -c "import sklearn, numpy, matplotlib" 2>/dev/null; then
+    exec "${cand}" "$@"
+  fi
+done
+
+if [[ -n "${SINGULARITY_SIF:-}" ]]; then
+  exec wm_exec python3 "$@"
+fi
+
+echo "sbpy: no interpreter with numpy/scikit-learn/matplotlib found." >&2
+echo "      Install them (pip install -r ../requirements.txt), or set" >&2
+echo "      WM_SKLEARN_PY, or set SINGULARITY_SIF to a container providing them." >&2
+exit 1

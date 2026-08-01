@@ -1,32 +1,30 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: BSD-3-Clause
-# Run all 5 prior-work baselines x 8 paper designs = 40 chained ORFS flows to
+# Run all prior-work baselines x 8 paper designs = 24 chained ORFS flows to
 # populate the baseline rows of tab:ppa_ng45 and tab:ppa_asap7.
 #
-# Each baseline run.sh auto-re-execs inside Singularity (ispd26.sif), embeds its
-# placement/CTS watermark on the reference ODB, runs `make wm_cts_and_route`
-# (CTS + route + finish), and verifies at the DRT stage.  Outputs land under
+# Each baseline run.sh embeds its placement/CTS watermark on the reference ODB,
+# runs `make wm_cts_and_route` (CTS + route + finish), and verifies at the DRT
+# stage.  Outputs land under
 #   experiments/results/<plat>/<nickname>/baseline-<method>/
 #   experiments/logs/<plat>/<nickname>/baseline-<method>/6_report.json
 # which is exactly where phase1_ppa.py looks.
 #
 # Usage:
-#   bash run_baselines_all.sh                 # all 5 methods, all 8 designs
-#   bash run_baselines_all.sh --only kahng    # one method (repeatable)
-#   SKIP_DONE=1 bash run_baselines_all.sh     # skip designs whose 6_report.json exists
-#   BASELINES="kahng icmarks" bash run_baselines_all.sh
+#   bash run_baselines_all.sh                    # all methods, all 8 designs
+#   bash run_baselines_all.sh --only row_parity  # one method (repeatable)
+#   SKIP_DONE=1 bash run_baselines_all.sh        # skip designs already done
+#   BASELINES="row_parity icmarks" bash run_baselines_all.sh
+#
+# To fan out across terminals, run one method per invocation:
+#   BASELINES=row_parity       nohup bash run_baselines_all.sh > logs/b_rowparity.log 2>&1 &
+#   BASELINES=buffer_insertion nohup bash run_baselines_all.sh > logs/b_bufins.log    2>&1 &
+#   BASELINES=icmarks          nohup bash run_baselines_all.sh > logs/b_icmarks.log   2>&1 &
 #
 # Notes:
 #  * BP uses DESIGN=bp_multi_top (config) but DESIGN_NICKNAME=bp_multi (results);
 #    the per-method run.sh honor DESIGN_NICKNAME for all filesystem paths.
 #  * Each flow takes minutes-to-hours; run under nohup/tmux for the full sweep.
-
-# cd /home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD-flow-scripts/flow/watermarking/experiments
-# BASELINES=kahng            nohup bash run_baselines_all.sh > logs/b_kahng.log     2>&1 &
-# BASELINES=cell_scattering  nohup bash run_baselines_all.sh > logs/b_cellscat.log  2>&1 &
-# BASELINES=buffer_insertion nohup bash run_baselines_all.sh > logs/b_bufins.log    2>&1 &
-# BASELINES=icmarks          nohup bash run_baselines_all.sh > logs/b_icmarks.log   2>&1 &
-# BASELINES=automarks        nohup bash run_baselines_all.sh > logs/b_automarks.log 2>&1 &
 
 
 set -euo pipefail
@@ -36,25 +34,21 @@ BASE="${HERE}/baselines"
 
 # method -> run.sh
 declare -A DRIVER=(
-  [kahng]="${BASE}/kahng/run.sh"
-  [cell_scattering]="${BASE}/cell_scattering/run.sh"
+  [row_parity]="${BASE}/row_parity/run.sh"
   [buffer_insertion]="${BASE}/buffer_insertion/run.sh"
   [icmarks]="${BASE}/icmarks/run.sh"
-  [automarks]="${BASE}/automarks/run.sh"
 )
 # method -> FLOW_VARIANT written under experiments/{results,logs}
 declare -A VARIANT=(
-  [kahng]="baseline-kahng"
-  [cell_scattering]="baseline-cellscatter"
+  [row_parity]="baseline-row-parity"
   [buffer_insertion]="baseline-bufins"
   [icmarks]="baseline-icmarks"
-  [automarks]="baseline-automarks"
 )
 
-BASELINES="${BASELINES:-kahng cell_scattering buffer_insertion icmarks automarks}"
+BASELINES="${BASELINES:-row_parity buffer_insertion icmarks}"
 # --only <method> [--only <method> ...] restricts the run to specific baselines
 # (equivalent to BASELINES="<m1> <m2> ...").  Do NOT shift inside a loop over
-# "$@" -- that corrupts the args and silently falls back to all 5 methods.
+# "$@" -- that corrupts the args and silently falls back to all methods.
 ONLY=()
 args=("$@")
 idx=0
@@ -70,7 +64,7 @@ done
 [[ ${#ONLY[@]} -gt 0 ]] && BASELINES="${ONLY[*]}"
 
 SKIP_DONE="${SKIP_DONE:-0}"
-export OWNER_ID="${OWNER_ID:-yiting}"
+export OWNER_ID="${OWNER_ID:-pdmarks-owner}"
 
 # 8 paper designs: "platform design ref_variant nickname"
 read -r -d '' BENCHES <<'EOF' || true
@@ -115,7 +109,7 @@ log "Done: ${pass} passed, ${skip} skipped, ${fail} failed"
 for r in "${FAILED[@]:-}"; do [[ -n "${r}" ]] && log "  FAILED ${r}"; done
 log ""
 log "Next: refresh the PPA tables with"
-log "  python3.11 ${HERE}/phase1_ppa.py"
-log "  python3.11 ${HERE}/aggregate.py --what ppa"
-log "  python3.11 ${HERE}/render_tex.py"
+log "  python3 ${HERE}/phase1_ppa.py"
+log "  python3 ${HERE}/aggregate.py --what ppa"
+log "  python3 ${HERE}/render_tex.py"
 [[ ${fail} -gt 0 ]] && exit 1 || exit 0

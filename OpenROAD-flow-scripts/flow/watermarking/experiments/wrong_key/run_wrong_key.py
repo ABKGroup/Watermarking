@@ -1,18 +1,18 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Wrong-key null-distribution experiment (Sec. wrong-key / tab:wrong-key).
 
 For each active bench's all-stage layout we:
 
-1. Read the routed ODB once to get route_counts.csv (cached if present).
+1. Read the routed ODB once to get route_qr.csv (cached if present).
 2. Read the true 32-byte seeds for P, C, R from gen_key/out/<design>/.
-3. Compute the TRUE evidence (r_P, r_C, Z_R, p_R) and r_all.
+3. Compute the TRUE evidence (r_P, r_C, T_R, p_R) and r_all.
 4. Generate N (default 1000) deterministic 32-byte wrong master keys; for
    each, derive (seed_P', seed_C', seed_R') via SHA256 chaining and:
    - r_P' from placement_extraction_rate using the embed CSV but the wrong
      seed (target bits/perms recomputed)
    - r_C' from cts_extraction_rate likewise
-   - Z_R', p_R' from a reconstructed WM_R' using seed_R'
+   - T_R', p_R' from a reconstructed WM_R' using seed_R'
 5. Empirical P_c is the fraction of wrong-key trials whose r_all' >= true
    r_all (i.e., "would also have passed").  We also save the full
    distribution for the figure.
@@ -32,6 +32,8 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
+
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 from bench_matrix import ACTIVE_BENCHES
@@ -43,7 +45,10 @@ from lib.orfs import (
     wm_module_results, find_latest_wm_variant,
 )
 from lib.pc import pc_stage, pc_total
-from lib.route_stat import read_counts_csv, route_stat_from_counts
+from lib.route_stat import (
+    per_net_qr, build_qr_vector, observed_T, design_seed,
+    randomization_pvalue, randomization_pvalue_normal,
+)
 
 
 def true_seeds(design):
@@ -59,14 +64,23 @@ def true_seeds(design):
 def eval_one_key(seed_P, seed_C, seed_R, *,
                  embed_p_csv, observe_p_csv,
                  embed_c_csv, observe_c_csv,
-                 routing_counts, fraction, alpha_R=0.05):
-    """Return (r_P, r_C, Z_R, p_R, r_R, pc_all, r_all) for a given key triple.
+                 routing_counts, fraction, alpha_R=0.05,
+                 qr_ctx=None, design_id="", exact_routing=False, B=100_000):
+    """Return (r_P, r_C, T_R, p_R, r_R, pc_all, r_all) for a given key triple.
 
     Per paper Eq. eq:routing_extraction:    r_R = 1{p_R <= alpha_R}
     Per paper Eq. eq:combined_extraction:   r_all = mean(r_P, r_C, r_R)
         over the channels actually available.  Channels with no embedded
         constraints (X==0) or no routing counts (ASAP7) contribute nothing,
         so r_all averages only the stages we can measure.
+
+    Routing p-value: ``exact_routing=True`` runs the full B-trial randomization
+    test (used for the true key); otherwise the analytic normal approximation
+    is used, clamped at the empirical floor 1/(B+1).  A full randomization per
+    wrong key would be infeasible across a 1000+ key sweep.
+
+    ``qr_ctx`` is the key-independent (names, q) pair from ``_qr_context``; the
+    q vector never depends on the key, only the selection mask does.
     """
     pcs = []
     if embed_p_csv.exists() and observe_p_csv.exists():
@@ -83,18 +97,35 @@ def eval_one_key(seed_P, seed_C, seed_R, *,
             pcs.append(pc_stage(X, x, 0.5))
     else:
         r_C = None
-    Z_R = p_R = r_R = None
-    if routing_counts:
+    T_R = p_R = r_R = None
+    if routing_counts and qr_ctx is not None:
+        names, q = qr_ctx
         wm = routing_wm_set(seed_R, routing_counts.keys(), fraction)
-        st = route_stat_from_counts(routing_counts, wm)
-        Z_R, p_R = st.Z_R, st.p_R
-        r_R = 1.0 if p_R is not None and p_R <= alpha_R else 0.0
-        pcs.append(p_R)
+        sel = np.fromiter((n in wm for n in names), dtype=bool, count=len(names))
+        k = int(sel.sum())
+        if 0 < k < q.size:
+            T_R = observed_T(q, sel)
+            if exact_routing:
+                p_R = randomization_pvalue(q, design_seed(design_id), k, T_R, B=B)
+            else:
+                p_R = max(randomization_pvalue_normal(q, k, T_R), 1.0 / (B + 1))
+            r_R = 1.0 if p_R <= alpha_R else 0.0
+            pcs.append(p_R)
     pc_all = pc_total(*pcs) if pcs else None
     # Average of available stage extraction rates (paper Eq. eq:combined_extraction).
     parts = [v for v in (r_P, r_C, r_R) if v is not None]
     r_all = (sum(parts) / len(parts)) if parts else None
-    return r_P, r_C, Z_R, p_R, r_R, pc_all, r_all
+    return r_P, r_C, T_R, p_R, r_R, pc_all, r_all
+
+
+def _qr_context(counts):
+    """Return the key-independent (names, q) vectors for the routing channel."""
+    if not counts:
+        return None
+    vec = build_qr_vector(counts, set())
+    if vec.n_eligible == 0:
+        return None
+    return vec.names, vec.q
 
 
 def main():
@@ -103,10 +134,14 @@ def main():
     ap.add_argument("--fraction", type=float, default=0.01)
     ap.add_argument("--alpha-R", type=float, default=0.05,
                     help="Routing-stage threshold for r_R = 1{p_R <= alpha_R}.")
+    ap.add_argument("--randomization-B", type=int, default=100_000,
+                    help="Trials for the exact routing randomization test on "
+                         "the true key; also sets the wrong-key p_R floor "
+                         "1/(B+1).")
     ap.add_argument("--no-routing-platforms", default="asap7",
                     help="Comma-separated platforms for which to skip the "
                          "routing channel entirely (ASAP7 has no wrong-way "
-                         "segments, so p_R is always 0.5).  Default: asap7")
+                         "wirelength, so T_R is always 0).  Default: asap7")
     args = ap.parse_args()
     _no_route_plats = {p.strip() for p in args.no_routing_platforms.split(",")
                        if p.strip()}
@@ -126,7 +161,7 @@ def main():
         # The canonical embed location for all benches is the consolidated
         # all-stage directory under experiments/results/.  It contains both
         # placement / CTS embed CSVs (with the "_all_stage" suffix) and the
-        # pre-dumped routing artifacts (watermark_nets.txt, route_counts_*.csv).
+        # pre-dumped routing artifacts (watermark_nets.txt, route_qr_*.csv).
         # Fall back to the legacy flow/results/<wm_flow_variant>/ layout for
         # benches that were embedded before the consolidation.
         all_stage_dir = experiment_results(b.platform, nick, "pdmarks-all-stage")
@@ -142,8 +177,8 @@ def main():
             embed_dir = all_stage_dir
             embed_p   = all_stage_dir / "wm_place_order_embed_all_stage.csv"
             embed_c   = all_stage_dir / "wm_cts_pairs_embed_all_stage.csv"
-            # The all-stage flow dumps route_counts as part of its finishing step.
-            for cand in ("route_counts_5_route.csv", "route_counts.csv"):
+            # The all-stage flow dumps route_qr as part of its finishing step.
+            for cand in ("route_qr_5_route.csv", "route_qr.csv"):
                 if (all_stage_dir / cand).exists():
                     rc_csv = all_stage_dir / cand
                     break
@@ -163,34 +198,35 @@ def main():
         observe_p = embed_p
         observe_c = embed_c
 
-        # Fallback for routing counts: if the all-stage dir didn't have one
-        # (or we're on the legacy path), look in the routing_wrong_way module
-        # results dir and dump it from the routed ODB on demand.
+        # Fallback for routing artifacts: if the all-stage dir didn't have one
+        # (or we're on the legacy path), look in the routing_wm module results
+        # dir and dump it from the routed ODB on demand.
         if rc_csv is None or not rc_csv.exists():
-            route_var = find_latest_wm_variant("routing_wrong_way", b.platform, nick)
+            route_var = find_latest_wm_variant("routing_wm", b.platform, nick)
             route_dir = (
-                wm_module_results("routing_wrong_way", b.platform, nick, route_var)
+                wm_module_results("routing_wm", b.platform, nick, route_var)
                 if route_var else None
             )
             if route_dir is not None:
-                rc_csv = route_dir / "route_counts.csv"
+                rc_csv = route_dir / "route_qr.csv"
                 if not rc_csv.exists():
                     route_odb = route_dir / "5_route.odb"
                     if route_odb.exists():
                         subprocess.run(
-                            [str(HERE / "tools" / "dump_route_counts.sh")],
+                            [str(HERE / "tools" / "dump_route_qr.sh")],
                             env={**os.environ,
                                  "WM_ODB": str(route_odb),
-                                 "WM_COUNTS_CSV": str(rc_csv)},
+                                 "WM_QR_CSV": str(rc_csv)},
                             check=False)
-        counts = read_counts_csv(rc_csv) if (rc_csv and rc_csv.exists()) else {}
+        counts = per_net_qr(rc_csv) if (rc_csv and rc_csv.exists()) else {}
 
         # Per-platform routing-channel veto: ASAP7's strict-direction router
-        # produces zero wrong-way segments, so the routing statistic Z_R is
-        # structurally pinned to 0 and p_R to 0.5.  Including it would only
-        # add uniform noise to pc_all and r_all.
+        # produces zero wrong-way wirelength, so the routing statistic T_R is
+        # structurally pinned to 0 and p_R to 1.  Including it would only add
+        # uniform noise to pc_all and r_all.
         if b.platform in _no_route_plats:
             counts = {}
+        qr_ctx = _qr_context(counts)
 
         # True keys + true evidence
         try:
@@ -202,10 +238,12 @@ def main():
                                  embed_p_csv=embed_p, observe_p_csv=observe_p,
                                  embed_c_csv=embed_c, observe_c_csv=observe_c,
                                  routing_counts=counts, fraction=args.fraction,
-                                 alpha_R=args.alpha_R)
+                                 alpha_R=args.alpha_R, qr_ctx=qr_ctx,
+                                 design_id=b.design, exact_routing=True,
+                                 B=args.randomization_B)
 
-        # eval_one_key returns: (r_P, r_C, Z_R, p_R, r_R, pc_all, r_all)
-        true_rP, true_rC, true_ZR, true_pR, true_rR, true_pc, true_rall = true_eval
+        # eval_one_key returns: (r_P, r_C, T_R, p_R, r_R, pc_all, r_all)
+        true_rP, true_rC, true_TR, true_pR, true_rR, true_pc, true_rall = true_eval
 
         # Wrong-key sweep
         slug = f"{b.platform}_{b.design}"
@@ -216,19 +254,21 @@ def main():
         rall_samples = []
         with open(dist_path, "w", newline="") as f:
             wr = csv.writer(f)
-            wr.writerow(["idx", "r_P", "r_C", "Z_R", "p_R", "r_R", "pc_all", "r_all"])
+            wr.writerow(["idx", "r_P", "r_C", "T_R", "p_R", "r_R", "pc_all", "r_all"])
             for i, m in enumerate(masters):
                 seeds = derive_stage_seeds(m)
                 ev = eval_one_key(seeds["placement"], seeds["cts"], seeds["routing"],
                                   embed_p_csv=embed_p, observe_p_csv=observe_p,
                                   embed_c_csv=embed_c, observe_c_csv=observe_c,
                                   routing_counts=counts, fraction=args.fraction,
-                                  alpha_R=args.alpha_R)
-                rP, rC, ZR, pR, rR, pc, r_all = ev
+                                  alpha_R=args.alpha_R, qr_ctx=qr_ctx,
+                                  design_id=b.design, exact_routing=False,
+                                  B=args.randomization_B)
+                rP, rC, TR, pR, rR, pc, r_all = ev
                 wr.writerow([i,
                              rP    if rP    is not None else "",
                              rC    if rC    is not None else "",
-                             ZR    if ZR    is not None else "",
+                             TR    if TR    is not None else "",
                              pR    if pR    is not None else "",
                              rR    if rR    is not None else "",
                              pc    if pc    is not None else "",
@@ -251,7 +291,7 @@ def main():
             "routing_skipped": (b.platform in _no_route_plats) or not counts,
             "true_r_P":   true_rP,
             "true_r_C":   true_rC,
-            "true_Z_R":   true_ZR,
+            "true_T_R":   true_TR,
             "true_p_R":   true_pR,
             "true_r_R":   true_rR,
             "true_Pc":    true_pc,

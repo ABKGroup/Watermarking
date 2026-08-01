@@ -24,9 +24,9 @@ from typing import Dict, Optional
 #   export ORFS_FLOW_HOME=/my/other/orfs/flow
 # This propagates automatically to every helper below.
 
-_DEFAULT_FLOW_HOME = Path(
-    "/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD-flow-scripts/flow"
-)
+# lib/orfs.py lives at <flow>/watermarking/experiments/lib/orfs.py, so the
+# ORFS flow root is three levels up.  ORFS_FLOW_HOME overrides it.
+_DEFAULT_FLOW_HOME = Path(__file__).resolve().parents[3]
 
 FLOW_HOME: Path = Path(os.environ.get("ORFS_FLOW_HOME", str(_DEFAULT_FLOW_HOME)))
 
@@ -210,7 +210,7 @@ def _normalize_timing_to_ns(rm: "RefMetrics") -> None:
     NanGate45 uses nanoseconds; ASAP7 uses picoseconds.  Without this fix
     the same column name ``wns_ns`` would mean ns on NG45 and ps on ASAP7,
     which produced misleading ASAP7 ΔWNS/ΔTNS values in tab:ppa_asap7
-    (e.g. ``34.738`` for SweRV/AutoMarks read as 34.7 ns of slack drop
+    (e.g. ``34.738`` read as 34.7 ns of slack drop
     on a 1.46 ns clock — actually 0.035 ns once converted).
 
     Call this from every metric-loader before returning the ``RefMetrics``

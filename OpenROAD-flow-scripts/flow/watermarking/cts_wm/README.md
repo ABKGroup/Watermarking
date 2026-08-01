@@ -1,181 +1,186 @@
-# CTS fanout-parity watermark (v2)
+# CTS watermark — leaf-clock-buffer fanout parity
 
-Post-TritonCTS watermark: for selected **LCB pairs** `(L_A, L_B)` the secret seed
-fixes **sequential fanout parity** ``seq_fanout(target_lcb) % 2``. Parity is
-adjusted by reassigning **boundary flip-flops** between the two LCBs.
-Incremental timing guards each move; successful pairs mark LCBs (and quasi-leaf
-repair cells) **do-not-touch** so downstream routing does not undo the watermark.
+Embeds ownership evidence in the **sequential fanout parity** of selected
+leaf clock buffers (LCBs) on a post-TritonCTS ODB. The key comes from
+[`../gen_key/`](../gen_key/) as `seed_cts.hex`.
 
-Two **channels** plus mixed pair support (priority: pure, quasi-leaf, then
-pure-quasi):
+## What the watermark is
 
-| Channel       | Meaning |
-|---------------|---------|
-| `pure`        | Leaf LCB: all clock sinks are FFs (`repair_fanout == 0`, `other_fanout == 0`). |
-| `quasi_leaf`  | `seq_fanout > 1`, `1 <= repair_fanout <= R_max`, `other_fanout == 0`; repair naming heuristics + stricter slew/cap/slack checks; repair identities frozen. |
-| `pure_quasi` pair | Cross-channel pair with one pure LCB and one quasi-leaf LCB. It uses the same `seq_fanout(target_lcb) % 2` bit and the stricter quasi-leaf safety checks. |
+For a keyed pair of neighbouring LCBs `(L_A, L_B)`, the seed fixes
 
-Candidate **pairs** may be pure-pure, quasi-quasi, or pure-quasi. Pairs are
-geographic neighbors (centroid distance). The seed selects pairs and per-pair
-target bit / which side is target.
+```
+seq_fanout(target_lcb) % 2  ==  target_bit
+```
 
-All pseudo-randomness uses the 32B `seed_cts.hex` from
-[`watermarking/gen_key/`](../gen_key/README.md). No `WM_KEY` / `WM_MESSAGE`.
+where `target_bit` and which of the two LCBs is the target both come from the
+seed. Parity is adjusted by **moving one boundary flip-flop** from the target
+LCB to its peer — no buffers are added or removed, and the clock tree keeps its
+shape. A boundary FF is one whose distance gap to the peer LCB is within
+`WM_CTS_DELTA_SITES` site pitches, so the move is short.
 
-## High-level flow
+Successful pairs are marked `setDoNotTouch` / `FIRM` (along with quasi-leaf
+repair cells) so downstream routing does not undo the watermark.
 
-1. Load post-CTS clock tree (`4_cts.odb`).
-2. Classify clock-buffer instances into pure LCBs, quasi-leaf LCBs, or non-candidates.
-3. Build candidate **pure**, **quasi_leaf**, and **pure_quasi** pairs (proximity).
-4. Boundary FFs: FFs on the target LCB whose distance gap to the peer LCB is within `delta` site pitches.
-5. Seed / HMAC selects watermark pairs and target bits.
-6. Embed with priority: fill **pure** first, then **quasi_leaf**, then
-   **pure_quasi**, until `WM_CTS_NUM_PAIRS` successes or attempts exhausted
-   (**one pair, one successful embed** — both LCBs are removed from the stack
-   after success).
-7. Legality + incremental **slew, capacitance, skew**, and (quasi) **setup/hold** slack checks after each FF move.
-8. Reject unsafe moves (revert reassignment).
-9. Mark accepted structures protected (`setDoNotTouch`, `FIRM`, plus repair cells on quasi-leaf).
-10. Continue routing / PPA (`run_ppa.sh`).
-11. Extract / verify (`run_verify_stages.sh`) using the embed CSV as ground truth.
+Ownership evidence is `r_C` and `P_c = sum_{i<=x} C(X,i) 0.5^X`: each pair is a
+fair coin under a wrong key.
 
-## Classification
+## Channels
 
-Per LCB output net, each sink is labeled:
+Every clock buffer is classified by what its output net drives:
 
-- **seq**: sequential clock pin (FF).
-- **repair**: timing-repair load/buffer whose instance basename contains a
-  repair hint (`rebuffer`, `wire`, `hold`, `max_cap`, `max_slew`, `fanout`,
-  `load_slew`, `clkload`, `clk_load`), and **not** named like a CTS LCB
-  (`clkbuf`, …). `clkload` is recognized even when the Liberty master is not a
-  simple buffer.
-- **other**: everything else (violates leaf / quasi-leaf structure).
+- **seq** — a sequential clock pin (a flip-flop).
+- **repair** — a timing-repair cell, recognised by a basename hint
+  (`rebuffer`, `wire`, `hold`, `max_cap`, `max_slew`, `fanout`, `load_slew`,
+  `clkload`, `clk_load`) and *not* named like a CTS buffer (`clkbuf`, …).
+- **other** — anything else.
 
-**Pure LCB:** `seq > 0`, `repair == 0`, `other == 0`.
+| Channel | Definition |
+|---|---|
+| `pure` | `seq > 0`, `repair == 0`, `other == 0` |
+| `quasi_leaf` | `seq > 1`, `1 <= repair <= R_max`, `other == 0` |
+| *(neither)* | not a candidate |
 
-**Quasi-leaf LCB:** `seq > 1`, `1 <= repair <= R_max` (default `WM_CTS_R_MAX=2`),
-`other == 0`.
+Candidate pairs may be pure–pure, quasi–quasi, or the cross-channel
+`pure_quasi`. All three use the same `seq_fanout % 2` bit; quasi-leaf pairs
+additionally enforce capacitance margin, tighter slew, setup/hold bounds, and a
+**repair-signature check** — if the set of repair instances changes during a
+trial the move is reverted (`repair_changed`).
 
-**Non-candidate:** else.
+Pairs are filled in priority order **pure → quasi_leaf → pure_quasi** until
+`WM_CTS_NUM_PAIRS` successful embeds or the queue is exhausted. One pair, one
+successful embed: both LCBs leave the pool afterwards.
 
-Quasi-leaf embedding does not add repair buffers; after each trial, **repair
-instance identities** must match the pre-move signature or the move is reverted
-(`repair_changed`).
+## Embed algorithm
 
-## Algorithm (embed)
-
-1. **Run TritonCTS** → baseline `4_cts.odb`.
-2. **Classify** LCBs (`classify_lcbs`).
-3. **Proximity pairs** separately for pure, quasi_leaf, and pure-quasi pools.
-4. **Filters:** fanout headroom (Liberty `max_fanout`), slew margin; quasi_leaf
-   adds capacitance margin vs `max_capacitance`, optional skip of repair nets
-   with `hold` in the instance name (`WM_CTS_AVOID_HOLD_REPAIR`).
-5. **Selection:** domain-separated RNGs (`cts_pure`, `cts_quasi`, `cts_pure_quasi`); `WM_CTS_CHANNEL_BUDGET`
-   (`auto` | `pure_only` | `quasi_only` | `N:M` ratio caps).
-6. **Iterate** the merged queue until **successful embed count** reaches
-   `WM_CTS_NUM_PAIRS` or no more attempts. Skip if either LCB was already used
-   (`lcb_already_used`).
-7. **Parity:** if `seq_fanout(target) % 2 != target_bit`, move the closest
-   boundary FF from target → other; **seq parity** defines the bit (same for pure
-   and quasi; for pure, total fanout equals seq).
-8. **Incremental STA** after each trial: slew (and quasi: enforced margin vs
-   `max_transition`), optional cap vs `max_capacitance`, skew growth bound,
-   quasi setup/hold slack degradation bounds; quasi repair-signature equality.
-9. **CSV** ground truth + watermarked ODB.
+1. Read the post-CTS ODB and classify every clock buffer.
+2. Build proximity pairs (centroid distance ≤ `WM_CTS_SIBLING_DIST_UM`)
+   separately per channel pool.
+3. Filter on Liberty headroom: `max_fanout` slack, slew margin, and (quasi)
+   capacitance margin.
+4. Select pairs and target bits with domain-separated RNGs
+   (`cts_pure`, `cts_quasi`, `cts_pure_quasi`), honouring
+   `WM_CTS_CHANNEL_BUDGET`.
+5. For each pair, if parity is already correct, record it and move on;
+   otherwise move the closest boundary FF from target to peer.
+6. Run incremental STA after each trial — slew, capacitance, skew growth, and
+   (quasi) setup/hold degradation. Reject and revert anything unsafe.
+7. Mark accepted structures do-not-touch; write the watermarked ODB and the
+   ground-truth CSV.
 
 ## Files
 
 | File | Role |
-|------|------|
-| `cts_watermark_common.py` | Seed/HMAC, sink breakdown, classification, pairing, Liberty/timing/cap helpers |
-| `cts_watermark_embed.py` | Two-channel embed, filters, legalize checks, CSV + ODB |
-| `cts_watermark_verify.py` | CSV vs ODB: `seq_fanout % 2`, quasi repair tamper |
-| `cts_watermark_verify_stages.py` | Same check across stage ODBs |
-| `cts_wm.sh` | Singularity wrapper (`embed` / `verify` / `verify_stages` / `all`) |
-| `run_cts_wm.sh` | AES / NanGate45 defaults; keygen + `cts_wm.sh` |
-| `run_verify_stages.sh` | Stage verification defaults |
-| `run_ppa.sh` | GRT + DRT from `4_cts_wm.odb` |
+|---|---|
+| `cts_watermark_common.py` | classification, pairing, Liberty/timing helpers |
+| `cts_watermark_embed.py` | channel embed, filters, legality checks, CSV + ODB |
+| `cts_watermark_verify.py` | verify one ODB against the embed CSV |
+| `cts_watermark_verify_stages.py` | verify across a `label:odb` stage list |
+| `cts_wm.sh` | thin wrapper: `embed` / `verify` / `verify_stages` / `all` |
+| `run_cts_wm.sh` | end-to-end example: key bundle → embed → verify |
+| `run_ppa.sh` | continue the ORFS back-end (GRT + DRT) from the marked ODB |
+| `run_verify_stages.sh` | verify at post-CTS / GRT / DRT / final |
+
+The keyed primitives live in [`../wm_prf.py`](../wm_prf.py), shared with the
+placement and routing stages.
 
 ## Usage
 
 ```bash
-cd "$ORFS_FLOW_HOME"/watermarking/cts_wm
-chmod +x run_cts_wm.sh run_verify_stages.sh run_ppa.sh cts_wm.sh
+export DESIGN=jpeg PLATFORM=nangate45 WM_FLOW_VARIANT=base
 
-# 1) Embed + self-verify (also ensures gen_key/ produced seed_cts.hex).
-./run_cts_wm.sh all
-
-# 2) Run GRT + DRT on the watermarked CTS ODB.
-./run_ppa.sh
-
-# 3) Verify watermark survival across stages.
-./run_verify_stages.sh
+./run_cts_wm.sh          # embed + self-verify
+./run_ppa.sh             # optional: GRT + DRT from the watermarked CTS ODB
+./run_verify_stages.sh   # optional: confirm survival at each later stage
 ```
 
-### Direct invocation (Singularity)
+Driving the embedder directly:
 
 ```bash
-export WM_SEED_HEX=.../gen_key/out/aes/seed_cts.hex
-export WM_CTS_INPUT=.../4_cts.odb
-export WM_CTS_OUTPUT_ODB=.../4_cts_wm.odb
-export WM_CTS_OUTPUT_CSV=.../wm_cts_pairs_embed.csv
-./cts_wm.sh embed
-
-export WM_CTS_VERIFY_INPUT=.../4_cts_wm.odb
-export WM_CELL_LIST=.../wm_cts_pairs_embed.csv
-./cts_wm.sh verify
+WM_SEED_HEX=../gen_key/out/jpeg/seed_cts.hex \
+WM_CTS_INPUT=.../4_cts.odb \
+WM_CTS_OUTPUT_ODB=.../4_cts_wm.odb \
+WM_CTS_OUTPUT_CSV=.../wm_cts_pairs_embed.csv \
+  ./cts_wm.sh embed
 ```
 
-## Environment
+## Parameters
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `WM_SEED_HEX` | `gen_key/out/<design>/seed_cts.hex` | 32B HMAC seed |
-| `WM_CTS_INPUT` | `${FLOW_RES}/4_cts.odb` | Post-CTS ODB |
-| `WM_CTS_OUTPUT_ODB` | `${FLOW_RES}/4_cts_wm.odb` | Watermarked ODB |
-| `WM_CTS_OUTPUT_CSV` | `${FLOW_RES}/wm_cts_pairs_embed.csv` | Ground-truth CSV |
-| `WM_CTS_NUM_PAIRS` | 32 | Target **successful** embed count |
-| `WM_CTS_SIBLING_DIST_UM` | 20 | Max centroid distance (µm) for a pair |
-| `WM_CTS_DELTA_SITES` | 2 | Boundary-FF threshold (site pitches) |
-| `WM_CTS_FANOUT_MARGIN` | 2 | Min slack vs Liberty `max_fanout` |
-| `WM_CTS_SLEW_HEADROOM_FRAC` | 0.20 | Min output slew margin (**pure** channel) |
-| `WM_CTS_SKEW_SLACK_PS` | 20 | Max growth of worst \|clock skew\| vs baseline (pure) |
-| `WM_CTS_MAX_FANOUT` | 32 | Fallback `max_fanout` |
-| `WM_CTS_MAX_TRANSITION_NS` | 0.4 | Fallback `max_transition` (ns) |
-| `WM_CTS_MAX_CAP_FF` | 50 | Fallback `max_capacitance` (fF) |
-| `WM_CTS_MAX_ATTEMPTS` | 3 | Boundary-FF trials per pair |
-| `WM_CTS_R_MAX` | 2 | Quasi-leaf max `repair_fanout` |
-| `WM_CTS_QL_SLEW_HEADROOM_FRAC` | max(0.30, pure+0.10) | Quasi-leaf slew margin |
-| `WM_CTS_QL_CAP_HEADROOM_FRAC` | 0.20 | Quasi-leaf capacitance margin |
-| `WM_CTS_QL_SETUP_SLACK_PS` | 50 | Quasi setup WNS degradation limit |
-| `WM_CTS_QL_HOLD_SLACK_PS` | 30 | Quasi hold WNS degradation limit |
-| `WM_CTS_QL_SKEW_SLACK_PS` | `WM_CTS_SKEW_SLACK_PS` | Quasi skew slack vs baseline |
-| `WM_CTS_AVOID_HOLD_REPAIR` | 1 | Skip quasi_leaf with `hold` repair hint |
-| `WM_CTS_CHANNEL_BUDGET` | auto | `auto` \| `pure_only` \| `quasi_only` \| `N:M` |
-| `WM_CELL_LIST` | embed CSV | Ground truth for verify |
-| `WM_CTS_VERIFY_INPUT` | embed output | ODB to verify |
-| `WM_CTS_VERIFY_CSV` | *(unset)* | Optional per-pair verify report |
-| `WM_VERIFY_STAGES` | see `run_verify_stages.sh` | `label:odb,...` |
-| `WM_STAGE_REPORT` | *(unset)* | Optional per-pair × stage CSV |
+`cts_watermark_embed.py`'s argparse defaults are the **single source of truth**;
+the wrapper scripts set none of them.
 
-## Embed CSV columns (ground truth)
+**Required**
 
-Includes `channel`, `target_lcb`, `target_bit`, `final_bit`, seq/repair fanout
-counts, caps, `skipped_reason`, etc. Verification uses **`seq_fanout(target_lcb) % 2`**
-vs `target_bit`. Legacy CSVs without `channel` default to **pure**; parity still
-matches when all sinks were sequential.
+| Var | Meaning |
+|---|---|
+| `WM_CTS_INPUT` | post-CTS `.odb` |
+| `WM_CTS_OUTPUT_ODB` | watermarked `.odb` to write |
+| `WM_CTS_OUTPUT_CSV` | ground-truth CSV (the verification commitment) |
+| `WM_SEED_HEX` | `seed_cts.hex` |
 
-## Exit codes
+**Selection**
 
-`cts_watermark_verify.py` and `cts_watermark_verify_stages.py` exit **0** when
-every pair matches (`observed_bit == target_bit` and no quasi repair tampering),
-**2** otherwise.
+| Var | Meaning | Default |
+|---|---|---|
+| `WM_CTS_NUM_PAIRS` | target number of **successful** embeds | 32 |
+| `WM_CTS_SIBLING_DIST_UM` | max centroid distance for a pair (µm) | 20 |
+| `WM_CTS_DELTA_SITES` | boundary-FF threshold (site pitches) | 2 |
+| `WM_CTS_MAX_ATTEMPTS` | boundary-FF trials per pair | 3 |
+| `WM_CTS_CHANNEL_BUDGET` | `auto` \| `pure_only` \| `quasi_only` \| `N:M` | auto |
+| `WM_CTS_R_MAX` | quasi-leaf max `repair_fanout` | 2 |
 
-## Strength / notes
+**Safety margins (pure channel)**
 
-- **Null probability** per pair is \(p = 1/2\) on parity; with \(N\) independent
-  constraints, \(P_c = \sum_{i=0}^{x} \binom{N}{i} 0.5^N\).
-- Downstream GRT/DRT generally preserve clock sink wiring; **do-not-touch** on
-  watermarked LCBs (and quasi repair cells) reduces disruption.
-- CTS re-runs change buffer names; the **embed CSV** remains the verification
-  ground truth on later ODBs.
+| Var | Meaning | Default |
+|---|---|---|
+| `WM_CTS_FANOUT_MARGIN` | min slack against Liberty `max_fanout` | 2 |
+| `WM_CTS_SLEW_HEADROOM_FRAC` | min output slew margin | 0.20 |
+| `WM_CTS_SKEW_SLACK_PS` | max growth of worst \|clock skew\| vs baseline | 20 |
+
+**Safety margins (quasi-leaf channel)**
+
+| Var | Meaning | Default |
+|---|---|---|
+| `WM_CTS_QL_SLEW_HEADROOM_FRAC` | slew margin | `max(0.30, pure + 0.10)` |
+| `WM_CTS_QL_CAP_HEADROOM_FRAC` | capacitance margin | 0.20 |
+| `WM_CTS_QL_SETUP_SLACK_PS` | setup WNS degradation limit | 50 |
+| `WM_CTS_QL_HOLD_SLACK_PS` | hold WNS degradation limit | 30 |
+| `WM_CTS_QL_SKEW_SLACK_PS` | skew slack vs baseline | `WM_CTS_SKEW_SLACK_PS` |
+| `WM_CTS_AVOID_HOLD_REPAIR` | `1` skips quasi-leaf with a `hold` repair hint | 1 |
+
+**Liberty fallbacks** (used only when the value cannot be read from the library)
+
+| Var | Meaning | Default |
+|---|---|---|
+| `WM_CTS_MAX_FANOUT` | fallback `max_fanout` | 32 |
+| `WM_CTS_MAX_TRANSITION_NS` | fallback `max_transition` (ns) | 0.4 |
+| `WM_CTS_MAX_CAP_FF` | fallback `max_capacitance` (fF) | 50 |
+| `WM_LIB_FILES`, `WM_SDC`, `WM_SETRC` | STA inputs | auto-discovered |
+
+**Verify**
+
+| Var | Meaning |
+|---|---|
+| `WM_CTS_VERIFY_INPUT` | `.odb` to check |
+| `WM_CELL_LIST` | embed CSV (ground truth) |
+| `WM_CTS_VERIFY_CSV` | optional per-pair report |
+| `WM_VERIFY_STAGES` | `verify_stages` only: `label:odb,label:odb,…` |
+| `WM_STAGE_REPORT` | optional per-pair × stage CSV |
+
+## Verification
+
+The embed CSV carries `channel`, `target_lcb`, `target_bit`, `final_bit`, the
+seq/repair fanout counts, and `skipped_reason`. Verification recomputes
+`seq_fanout(target_lcb) % 2` on the ODB under test and compares it to
+`target_bit`; quasi-leaf pairs additionally fail if the repair signature was
+tampered with.
+
+A CTS re-run renames buffers, so the **embed CSV** — not the ODB — is the
+durable ground truth on later stages. Keep it for sign-off.
+
+Exit codes: `0` every pair matches, `2` otherwise.
+
+## Survival
+
+GRT and DRT generally preserve clock sink wiring, and the do-not-touch marks on
+watermarked LCBs and their repair cells reduce disruption further. Use
+`run_verify_stages.sh` to confirm this on your own designs.

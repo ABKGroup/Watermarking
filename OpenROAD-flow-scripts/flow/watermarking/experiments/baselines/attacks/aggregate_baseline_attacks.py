@@ -20,10 +20,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parents[2]
 RAW = HERE / "results" / "phase3" / "baseline_attacks"
 
-METHODS = ["kahng", "cell_scattering", "buffer_insertion", "icmarks", "automarks"]
-METHOD_LABEL = {"kahng": "Kahng", "cell_scattering": "Cell-scattering",
-                "buffer_insertion": "Buffer-insertion", "icmarks": "ICMarks",
-                "automarks": "AutoMarks"}
+METHODS = ["row_parity", "buffer_insertion", "icmarks"]
+METHOD_LABEL = {"row_parity": "Row-parity",
+                "buffer_insertion": "Buffer-insertion",
+                "icmarks": "ICMarks"}
 ORDER = [("nangate45", "jpeg", "JPEG (NG45)"), ("nangate45", "swerv_wrapper", "SweRV (NG45)"),
          ("nangate45", "ariane136", "Ariane (NG45)"), ("nangate45", "bp_multi_top", "BP (NG45)"),
          ("asap7", "jpeg", "JPEG (ASAP7)"), ("asap7", "swerv_wrapper", "SweRV (ASAP7)"),

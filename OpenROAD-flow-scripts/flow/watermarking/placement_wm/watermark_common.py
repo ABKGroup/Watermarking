@@ -7,12 +7,11 @@ selection and target bits/permutations.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import math
 import os
 import re
 import struct
+import sys
 from bisect import bisect_left
 from typing import (
     Callable,
@@ -27,54 +26,16 @@ from typing import (
 )
 
 # ---------------------------------------------------------------------------
-# argv / seed
+# Keyed primitives (shared with every other stage -- see ../wm_prf.py)
 # ---------------------------------------------------------------------------
 
-def argv_after_openroad_driver() -> List[str]:
-    """Return argv slice after ``openroad -python -exit script.py``."""
-    import sys
-
-    skip = {
-        "-python", "-exit", "-no_splash", "-no_init", "-no_settings",
-        "-gui", "-minimize",
-    }
-    raw = sys.argv[1:]
-    i = 0
-    while i < len(raw):
-        a = raw[i]
-        if a in skip:
-            i += 1
-            continue
-        if a.startswith("-threads") and i + 1 < len(raw):
-            i += 2
-            continue
-        break
-    if i < len(raw) and raw[i].endswith(".py"):
-        i += 1
-    return raw[i:]
-
-
-def load_seed_hex(path: str) -> bytes:
-    if not path or not os.path.isfile(path):
-        raise FileNotFoundError(f"WM_SEED_HEX path not found: {path!r}")
-    txt = open(path).read().strip()
-    if len(txt) < 32:
-        raise ValueError(f"seed hex too short in {path}: len={len(txt)}")
-    try:
-        raw = bytes.fromhex(txt)
-    except ValueError as e:
-        raise ValueError(f"seed file {path} is not valid hex: {e}")
-    if len(raw) < 16:
-        raise ValueError(f"seed too short after decode: {len(raw)} bytes")
-    return raw
-
-
-def _hmac(seed: bytes, *parts: bytes) -> bytes:
-    h = hmac.new(seed, b"", hashlib.sha256)
-    for p in parts:
-        h.update(struct.pack(">I", len(p)))
-        h.update(p)
-    return h.digest()
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from wm_prf import (  # noqa: E402
+    argv_after_openroad_driver,
+    binomial_pc,
+    hmac_digest as _hmac,
+    load_seed_hex,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -138,23 +99,6 @@ def permuted_order_names(names: Sequence[str], perm_idx: int) -> Tuple[str, str,
     return (lst[order[0]], lst[order[1]], lst[order[2]])
 
 
-def order_key_from_bits3(perm_idx: int) -> str:
-    """Stable string key for CSV: e.g. 'ABC' order as 0=A,1=B,2=C by sorted names."""
-    return f"perm{perm_idx}"
-
-
-# ---------------------------------------------------------------------------
-# Binomial coincidence
-# ---------------------------------------------------------------------------
-
-def binomial_pc(num_constraints: int, num_failures: int, p_success: float) -> float:
-    """P(at most ``num_failures`` unsatisfied) under i.i.d. P(success)=p_success."""
-    x = num_failures
-    X = num_constraints
-    total = 0.0
-    for i in range(0, x + 1):
-        total += math.comb(X, i) * (p_success ** (X - i)) * ((1.0 - p_success) ** i)
-    return total
 
 
 # ---------------------------------------------------------------------------
@@ -168,19 +112,8 @@ def sorted_row_bottoms(block) -> List[int]:
     return sorted({r.getBBox().yMin() for r in rows})
 
 
-def rows_by_bottom(block) -> Dict[int, List[object]]:
-    out: Dict[int, List[object]] = {}
-    for r in block.getRows():
-        out.setdefault(r.getBBox().yMin(), []).append(r)
-    return out
 
 
-def infer_row_pitch(row_bottoms: Sequence[int], site_height: int) -> int:
-    if len(row_bottoms) >= 2:
-        d = row_bottoms[1] - row_bottoms[0]
-        if d > 0:
-            return d
-    return site_height
 
 
 def inst_size(inst) -> Tuple[int, int]:
@@ -204,14 +137,6 @@ def snap_row_y(y: int, row_bottoms: Sequence[int]) -> int:
     return best
 
 
-def build_row_xmin_by_y(block) -> Dict[int, int]:
-    out: Dict[int, int] = {}
-    for r in block.getRows():
-        y = r.getBBox().yMin()
-        x = r.getBBox().xMin()
-        if y not in out or x < out[y]:
-            out[y] = x
-    return out
 
 
 def collect_movable_core_cells(block) -> List[object]:
@@ -717,45 +642,12 @@ def enumerate_close_triples_sorted_row(
                 yield (cells_sorted_x[i], cells_sorted_x[j], cells_sorted_x[k])
 
 
-def enumerate_cross_row_pairs(
-    row_low: Sequence[object],
-    row_high: Sequence[object],
-    max_dx_dbu: int,
-) -> Iterator[Tuple[object, object]]:
-    """row_low / row_high sorted by x; |x_a - x_b| <= max_dx."""
-    if not row_low or not row_high:
-        return
-    xs_hi = [inst_bottom_left(o)[0] for o in row_high]
-    for i, a in enumerate(row_low):
-        xa = inst_bottom_left(a)[0]
-        lo = bisect_left(xs_hi, xa - max_dx_dbu)
-        hi_idx = bisect_left(xs_hi, xa + max_dx_dbu + 1)
-        for j in range(lo, min(hi_idx, len(row_high))):
-            yield (a, row_high[j])
 
 
 # ---------------------------------------------------------------------------
 # HPWL (local nets only)
 # ---------------------------------------------------------------------------
 
-def net_hpwl_dbu(net) -> int:
-    xs: List[int] = []
-    ys: List[int] = []
-    try:
-        for it in net.getITerms():
-            try:
-                bb = it.getBBox()
-                cx = (bb.xMin() + bb.xMax()) // 2
-                cy = (bb.yMin() + bb.yMax()) // 2
-                xs.append(cx)
-                ys.append(cy)
-            except Exception:
-                continue
-        if len(xs) < 2:
-            return 0
-        return (max(xs) - min(xs)) + (max(ys) - min(ys))
-    except Exception:
-        return 0
 
 
 def affected_nets(insts: Sequence[object]) -> Set[object]:

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Run PPA continuation on attacked watermarked ODBs.
 
@@ -9,8 +9,8 @@ run_blind_attack.py writes attacked ODBs to experiments/results/phase3/raw/:
   atk_r_<plat>_<design>_qs<q>_counts.csv   (routing attack: no ODB)
 
 This script discovers each attacked ODB and continues the ORFS back-end:
-  placement attack -> CTS + route + finish via place_ordering/run_ppa.sh
-  cts attack       -> route + finish via cts_v2/run_ppa.sh
+  placement attack -> CTS + route + finish via placement_wm/run_ppa.sh
+  cts attack       -> route + finish via cts_wm/run_ppa.sh
   routing attack   -> SKIPPED (no ODB perturbation; PPA is undefined)
 
 Each continuation writes its own ORFS results / logs under FLOW_VARIANT
@@ -45,8 +45,8 @@ from bench_matrix import ACTIVE_BENCHES, Bench
 from lib.orfs import FLOW_HOME, experiment_logs, experiment_results
 
 RAW_DIR        = HERE / "results" / "phase3" / "raw"
-PLACE_RUN_PPA  = FLOW_HOME / "watermarking" / "place_ordering" / "run_ppa.sh"
-CTS_RUN_PPA    = FLOW_HOME / "watermarking" / "cts_v2"        / "run_ppa.sh"
+PLACE_RUN_PPA  = FLOW_HOME / "watermarking" / "placement_wm" / "run_ppa.sh"
+CTS_RUN_PPA    = FLOW_HOME / "watermarking" / "cts_wm"        / "run_ppa.sh"
 
 # Filename pattern for placement / CTS attacks.
 #   blind §7.1:   atk_p_<plat>_<design>_qs<q>.odb   /   atk_c_<plat>_<design>_qs<q>.odb

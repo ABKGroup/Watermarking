@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """PPA cost of the targeted attack at the *defeat-q* for each baseline.
 
@@ -31,15 +31,9 @@ from typing import Optional
 HERE = Path(__file__).resolve().parents[2]            # .../experiments
 sys.path.insert(0, str(HERE))
 from bench_matrix import ACTIVE_BENCHES
+from lib import orexec
 from lib.orfs import (FLOW_HOME, experiment_results, experiment_logs,
                       load_experiment_metrics)
-
-OPENROAD_EXE = os.environ.get(
-    "OPENROAD_EXE",
-    "/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD/build/bin/openroad")
-SIF = os.environ.get("SINGULARITY_SIF", "/home/tool/singularity/images/ispd26.sif")
-import shutil as _sh
-SINGULARITY = _sh.which("singularity") or "/usr/local/bin/singularity"
 
 RAW = HERE / "results" / "phase3" / "baseline_attacks"
 PPA_DIR = RAW / "ppa"
@@ -47,19 +41,15 @@ ALPHA = 0.05
 QS = [0.1, 0.2, 0.5, 0.8, 1.0]
 
 BL = {
-    "cell_scattering": dict(dir="baseline-cellscatter", odb="3_place_cellscatter.odb",
-                            carrier="place", abbr="cs"),
-    "kahng":           dict(dir="baseline-kahng", odb="3_place_kahng.odb",
-                            carrier="place", abbr="kg"),
+    "row_parity":      dict(dir="baseline-row-parity", odb="3_place_row_parity.odb",
+                            carrier="place", abbr="rp"),
     "icmarks":         dict(dir="baseline-icmarks", odb="3_place_icmarks.odb",
                             carrier="place", abbr="ic"),
-    "automarks":       dict(dir="baseline-automarks", odb="3_place_automarks.odb",
-                            carrier="place", abbr="am"),
     "buffer_insertion": dict(dir="baseline-bufins", odb="4_cts_bufins.odb",
                              carrier="buffer", abbr="bf"),
 }
-PLACE_PPA = FLOW_HOME / "watermarking" / "place_ordering" / "run_ppa.sh"
-CTS_PPA = FLOW_HOME / "watermarking" / "cts_v2" / "run_ppa.sh"
+PLACE_PPA = FLOW_HOME / "watermarking" / "placement_wm" / "run_ppa.sh"
+CTS_PPA = FLOW_HOME / "watermarking" / "cts_wm" / "run_ppa.sh"
 
 
 def _recs():
@@ -111,8 +101,8 @@ def regen_and_run(b, method, q, recs):
     log = PPA_DIR / f"mutate_{method}_{b.platform}_{b.design}.log"
     with open(log, "w") as f:
         rc = subprocess.run(
-            [SINGULARITY, "exec", "-B", "/home", SIF, OPENROAD_EXE, "-python",
-             "-exit", str(HERE / "baselines" / "attacks" / "or_baseline.py")],
+            orexec.openroad_python(
+                HERE / "baselines" / "attacks" / "or_baseline.py"),
             env=env, stdout=f, stderr=subprocess.STDOUT).returncode
     if rc != 0 or not atk_odb.exists():
         print(f"[FAIL mutate] {method} {b.platform}/{b.design} rc={rc}")

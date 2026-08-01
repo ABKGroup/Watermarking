@@ -7,13 +7,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Pick a Python >= 3.7 (needed for `from __future__ import annotations`).
+# Override with GEN_KEY_PYTHON.
 if [[ -n "${GEN_KEY_PYTHON:-}" ]]; then
   PYTHON_BIN="${GEN_KEY_PYTHON}"
-elif [[ -x "/home/yil375/.conda/envs/par_py311/bin/python" ]]; then
-  PYTHON_BIN="/home/yil375/.conda/envs/par_py311/bin/python"
 else
   PYTHON_BIN=""
-  for cand in python3.12 python3.11 python3.10 python3.9 python3.8 python3.7 python3; do
+  for cand in python3 python3.13 python3.12 python3.11 python3.10 python3.9 python3.8 python3.7; do
     if command -v "$cand" >/dev/null 2>&1; then
       ver="$($cand -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || true)"
       major="${ver%%.*}"; minor="${ver##*.}"

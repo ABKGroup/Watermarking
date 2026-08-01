@@ -10,13 +10,9 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HERE/../../../wm_env.sh"
 EXP_DIR="$(cd "${HERE}/../.." && pwd)"
-FLOW_HOME="$(cd "${EXP_DIR}/../.." && pwd)"
-WM_HOME="${FLOW_HOME}/watermarking"
 
-SIF="${SINGULARITY_SIF:-/home/tool/singularity/images/ispd26.sif}"
-SINGULARITY="$(command -v singularity || echo /usr/local/bin/singularity)"
-OPENROAD_EXE="${OPENROAD_EXE:-${FLOW_HOME}/../../OpenROAD/build/bin/openroad}"
 SKLEARN_PY="${WM_SKLEARN_PY:-${EXP_DIR}/sbpy}"
 
 DATASETS_DIR="${EXP_DIR}/results/phase3/raw/datasets"
@@ -121,7 +117,7 @@ for spec in $(seq 0 9); do
   export WM_ODB WM_LIB_FILES WM_SDC WM_SETRC WM_SEED_HEX
   export WM_FEAT_IN="${FEAT_IN}" WM_FEAT_OUT="${FEAT_OUT}"
   set +e
-  "${SINGULARITY}" exec -B /home "${SIF}" "${OPENROAD_EXE}" \
+  wm_exec "${OPENROAD_EXE}" \
       -python -exit "${HERE}/filter_cts_feasibility.py" \
       > "${FILTER_LOG}" 2>&1
   rc=$?

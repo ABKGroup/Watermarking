@@ -16,29 +16,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import sys
 from pathlib import Path
-from typing import Dict
 
-
-STAGE_LABELS = ("placement", "cts", "routing")
-
-
-def derive_stage_seeds(master_seed: bytes) -> Dict[str, bytes]:
-    """master_seed -> {placement, cts, routing} seeds.  Matches seed_common."""
-    if len(master_seed) != 32:
-        raise ValueError(f"master_seed must be 32 bytes, got {len(master_seed)}")
-    return {
-        label: hashlib.sha256(master_seed + label.encode("utf-8")).digest()
-        for label in STAGE_LABELS
-    }
-
-
-def load_seed_hex(path: Path) -> bytes:
-    raw = Path(path).read_text().strip().split()[0]
-    b = bytes.fromhex(raw)
-    if len(b) != 32:
-        raise ValueError(f"expected 32-byte seed in {path}, got {len(b)}")
-    return b
+# Seed derivation and hex loading are shared with the embedders; see
+# <flow>/watermarking/wm_prf.py.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from wm_prf import (  # noqa: E402
+    STAGE_LABELS,
+    derive_stage_seeds,
+    load_seed_hex,
+)
 
 
 def wrong_key_stream(count: int, namespace: str = "pdmarks-wrong-key") -> list:

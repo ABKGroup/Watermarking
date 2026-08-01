@@ -20,10 +20,10 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")/.." && pwd)
+source "$HERE/../../wm_env.sh"
 RAW="$HERE/results/phase3/raw"
 
-SIF=${SINGULARITY_SIF:-/home/tool/singularity/images/ispd26.sif}
-ORE=${OPENROAD_EXE:-/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD/build/bin/openroad}
+ORE="${OPENROAD_EXE}"
 
 if [[ $# -gt 0 ]]; then
   files=("$@")
@@ -62,7 +62,7 @@ for odb in "${files[@]}"; do
 
   echo "[unlock-all] $name (ref: $plat/$nick/pdmarks-all-stage)"
   if WM_ODB="$odb" WM_OUT_ODB="$odb" WM_REF_ODB="$ref" \
-       singularity exec -B /home "$SIF" "$ORE" -python -exit \
+       wm_exec "$ORE" -python -exit \
          "$HERE/tools/unlock_atk_placement_odb.py" 2>&1 | grep '\[unlock\]'; then
     n_ok=$((n_ok+1))
   else

@@ -3,7 +3,7 @@
 
 The watermark embedders pick a key-dependent subset out of a key-INDEPENDENT
 eligible pool.  These helpers reconstruct that pool from the routed ODB (and
-the post-DRT route_counts CSV for routing) without any knowledge of the key,
+the post-DRT route_qr CSV for routing) without any knowledge of the key,
 matching what a paper-§7 attacker is allowed to do.
 
 The placement and CTS reconstructions delegate to the same enumeration
@@ -19,8 +19,8 @@ from typing import Iterator, List, Optional, Sequence, Tuple
 
 # Hook the embedder modules onto sys.path so their helpers import cleanly.
 _HERE = Path(__file__).resolve().parents[2]   # .../flow/watermarking
-sys.path.insert(0, str(_HERE / "place_ordering"))
-sys.path.insert(0, str(_HERE / "cts_v2"))
+sys.path.insert(0, str(_HERE / "placement_wm"))
+sys.path.insert(0, str(_HERE / "cts_wm"))
 
 try:
     from watermark_common import (   # type: ignore
@@ -94,7 +94,7 @@ def reconstruct_placement_pool(block, *,
     embedder either).
     """
     if not _PLACE_OK:
-        raise RuntimeError("place_ordering.watermark_common not importable")
+        raise RuntimeError("placement_wm.watermark_common not importable")
     cells = [c for c in collect_movable_core_cells(block)
              if not is_filler_tap_endcap(c.getMaster())]
     pool: List[Tuple[str, Tuple[object, ...]]] = []
@@ -143,7 +143,7 @@ def reconstruct_placement_pool_tight(block, *,
     width class -- it never reintroduces the width/HPWL artifact.
     """
     if not _PLACE_OK:
-        raise RuntimeError("place_ordering.watermark_common not importable")
+        raise RuntimeError("placement_wm.watermark_common not importable")
     cells = [c for c in collect_movable_core_cells(block)
              if not is_filler_tap_endcap(c.getMaster())]
     bbox, tw, th = make_tile_grid(block, grid_nx, grid_ny)
@@ -209,7 +209,7 @@ def reconstruct_placement_pool_embedder(design, *,
                                         pos_cell_names: "Optional[set]" = None
                                         ) -> List[Tuple[str, Tuple[object, ...]]]:
     """Reconstruct the eligible co-row PAIR pool *exactly* as the placement
-    embedder (place_ordering/watermark_embed.py) builds its candidate set, so
+    embedder (placement_wm/watermark_embed.py) builds its candidate set, so
     the targeted classifier's negatives are precisely E_P\\WM_P.
 
     Mirrors watermark_embed.py:460-535 cascade:
@@ -246,7 +246,7 @@ def reconstruct_placement_pool_embedder(design, *,
     *looked at*, not which objects are eligible.
     """
     if not _PLACE_OK:
-        raise RuntimeError("place_ordering.watermark_common not importable")
+        raise RuntimeError("placement_wm.watermark_common not importable")
     block = design.getBlock()
     rows_o = list(block.getRows())
     site = rows_o[0].getSite()
@@ -328,7 +328,7 @@ def reconstruct_cts_pool(block, *,
                          ) -> List[Tuple[str, object, object]]:
     """Return the public eligible CTS pool: (pair_key, L_A, L_B) per LCB pair."""
     if not _CTS_OK:
-        raise RuntimeError("cts_v2.cts_watermark_common not importable")
+        raise RuntimeError("cts_wm.cts_watermark_common not importable")
     lcbs = collect_lcbs(block)
     return build_proximity_pairs(lcbs, max_dist_dbu)
 
@@ -337,15 +337,15 @@ def reconstruct_cts_pool(block, *,
 # Routing: routable signal nets
 # ---------------------------------------------------------------------------
 
-def reconstruct_routing_pool(route_counts_csv: Path) -> List[str]:
+def reconstruct_routing_pool(route_qr_csv: Path) -> List[str]:
     """Return the list of routable signal net names (those with total>0).
 
-    Reads the per-net (wrong_way, total) CSV dumped by tools/dump_route_counts.py.
+    Reads the per-net (ww_len, tot_len) CSV dumped by tools/dump_route_qr.py.
     """
     out: List[str] = []
-    if not Path(route_counts_csv).exists():
+    if not Path(route_qr_csv).exists():
         return out
-    for row in csv.DictReader(open(route_counts_csv)):
+    for row in csv.DictReader(open(route_qr_csv)):
         try:
             total = int(row.get("total", 0))
         except (TypeError, ValueError):

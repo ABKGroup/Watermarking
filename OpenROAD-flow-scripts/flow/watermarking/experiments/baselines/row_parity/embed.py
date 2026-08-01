@@ -12,7 +12,7 @@ Algorithm
 1. Load 3_place.odb (post-detailed-placement).
 2. K = capacity_for(platform, design, variant), matched to PDMarks P-only.
 3. Eligible cells: movable, non-macro, non-fixed, single-row-height, not a
-   clock/hold buffer (same gate as cell_scattering for an apples-to-apples
+   clock/hold buffer (same gate as icmarks for an apples-to-apples
    comparison with PDMarks).
 4. Select K cells deterministically: HMAC-SHA256(seed_placement,
    b"kahng_row\0" + inst_name) -> u32; keep top-K by ascending score.
@@ -21,7 +21,7 @@ Algorithm
    shift its y-origin by +1 row pitch (then -1, +3, -3, ...) until it
    lands on a row with the target parity. Original x is preserved.
 7. Run detailed_placement to legalize. Re-read row parity to confirm.
-8. Write kahng_embed.csv and 3_place_kahng.odb.
+8. Write row_parity_embed.csv and 3_place_row_parity.odb.
 
 Run as:
   openroad -python -exit embed.py \\
@@ -56,7 +56,7 @@ _T0 = time.time()
 
 
 def _log(msg: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')} +{time.time()-_T0:6.1f}s] [kahng:embed] {msg}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')} +{time.time()-_T0:6.1f}s] [row_parity:embed] {msg}", flush=True)
 
 
 def _is_buffer_or_clock(inst) -> bool:
@@ -225,14 +225,14 @@ def main(argv: List[str]) -> None:
     _log(f"post-legalization: accepted={x}/{K}  Pc={pc:.2e}")
 
     out_dir = Path(args.odb).parent
-    csv_path = args.out_csv or str(out_dir / "kahng_embed.csv")
+    csv_path = args.out_csv or str(out_dir / "row_parity_embed.csv")
     with open(csv_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["inst", "target_bit", "before_row", "after_row", "satisfied", "skipped"])
         w.writeheader()
         w.writerows(rows)
     _log(f"embed CSV -> {csv_path}")
 
-    odb_out = args.out_odb or str(out_dir / "3_place_kahng.odb")
+    odb_out = args.out_odb or str(out_dir / "3_place_row_parity.odb")
     design.writeDb(odb_out)
     _log(f"watermarked ODB -> {odb_out}")
 

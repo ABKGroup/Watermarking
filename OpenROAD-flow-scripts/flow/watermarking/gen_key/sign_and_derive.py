@@ -66,10 +66,9 @@ def main() -> int:
     )
     p.add_argument(
         "--tool-root",
-        default=os.environ.get(
-            "OPENROAD_ROOT",
-            "/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD",
-        ),
+        default=os.environ.get("OPENROAD_ROOT", ""),
+        help="Git checkout whose HEAD is recorded in M.tool.commit "
+             "(default: $OPENROAD_ROOT, else 'unknown')",
     )
     p.add_argument(
         "--nonce",

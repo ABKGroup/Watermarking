@@ -2,7 +2,8 @@
 # Shared bash setup for PDMarks experiment drivers.
 #
 # Required env: DESIGN, PLATFORM, WM_FLOW_VARIANT
-# Optional env: OWNER_ID, FLOW_VARIANT, PROJ_DIR, DESIGN_NICKNAME
+# Optional env: OWNER_ID, FLOW_VARIANT, DESIGN_NICKNAME, ORFS_FLOW_HOME,
+#               OPENROAD_EXE, SINGULARITY_SIF  (see ../../wm_env.sh)
 #
 # DESIGN holds the ORFS DESIGN_NAME (matches designs/<plat>/<DESIGN>/config.mk
 # and gen_key/out/<DESIGN>/).  DESIGN_NICKNAME is the name ORFS uses on disk
@@ -13,13 +14,9 @@
 
 set -euo pipefail
 
-export PROJ_DIR="${PROJ_DIR:-/home/fetzfs_projects/MISC-ytliu/watermarking}"
-export OPENROAD_EXE="${OPENROAD_EXE:-${PROJ_DIR}/OR0415/OpenROAD/build/bin/openroad}"
-export KEPLER_FORMAL_EXE="${KEPLER_FORMAL_EXE:-${PROJ_DIR}/OR0415/kepler-formal/build/src/bin/kepler-formal}"
-export FLOW_HOME="${FLOW_HOME:-${PROJ_DIR}/OR0415/OpenROAD-flow-scripts/flow}"
-export EXPERIMENTS_HOME="${EXPERIMENTS_HOME:-${FLOW_HOME}/watermarking/experiments}"
-export WM_RESULTS_HOME="${WM_RESULTS_HOME:-${EXPERIMENTS_HOME}/results}"
-export OWNER_ID="${OWNER_ID:-yiting}"
+# Resolves FLOW_HOME / OPENROAD_EXE / OWNER_ID and defines wm_exec, which
+# transparently enters ${SINGULARITY_SIF} when that variable is set.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/wm_env.sh"
 
 if [[ -z "${DESIGN:-}" || -z "${PLATFORM:-}" || -z "${WM_FLOW_VARIANT:-}" ]]; then
   echo "[drivers/_common.sh] DESIGN, PLATFORM, WM_FLOW_VARIANT must be set" >&2

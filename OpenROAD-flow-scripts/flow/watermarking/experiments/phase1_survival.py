@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Phase 1.4 survival verification (tab:survival).
 
@@ -13,7 +13,7 @@ watermark at four checkpoints:
 Evidence rows emitted per design:
     r_P    placement extraction rate  (1 - x_P / X_P)
     r_C    CTS extraction rate         (1 - x_C / X_C)
-    Z_R,p_R routing Z-statistic / one-sided p-value
+    T_R,p_R routing statistic / net-level randomization p-value
     r_all  combined extraction rate across available evidence channels
 
 Artifact locations:
@@ -44,13 +44,12 @@ from bench_matrix import ACTIVE_BENCHES
 from lib.orfs import (
     FLOW_HOME, experiment_results,
 )
-from lib.route_stat import read_counts_csv, read_watermark_nets, \
-    route_stat_from_counts
+from lib.route_stat import per_net_qr, read_watermark_nets, route_stat_from_qr
 
 
 OUT_DIR = HERE / "results" / "phase1" / "raw"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-DUMP_SH = HERE / "tools" / "dump_route_counts.sh"
+DUMP_SH = HERE / "tools" / "dump_route_qr.sh"
 ALPHA_R = 0.05
 
 # Checkpoints: (stage_name, odb_name, which_dir)
@@ -76,7 +75,7 @@ def _read_place_verify_csv(verify_csv: Path) -> tuple[int, int]:
     """Return (total constraints, missing constraints) from place verifier CSV.
 
     Older verifier outputs are row-wise and expose an ``ok`` column.  The
-    current place_ordering verifier writes one summary row with
+    current placement_wm verifier writes one summary row with
     ``constraints_ok`` and ``constraints_total``.  Accept both formats so the
     survival table can be regenerated from cached verifier artifacts.
     """
@@ -119,7 +118,7 @@ def _read_cts_verify_csv(verify_csv: Path) -> tuple[int, int]:
 
 
 def _placement_verify(embed_dir: Path, stage_odb: Path) -> tuple:
-    """Return (X_P, x_P) by re-running place_ordering verify on stage_odb.
+    """Return (X_P, x_P) by re-running placement_wm verify on stage_odb.
 
     embed_dir contains the embed CSV; the verify output CSV is written there too.
     """
@@ -129,7 +128,7 @@ def _placement_verify(embed_dir: Path, stage_odb: Path) -> tuple:
     verify_csv = embed_dir / f"wm_place_order_verify_{stage_odb.stem}.csv"
     if not embed_csv.exists() or not stage_odb.exists():
         return 0, 0
-    sh = FLOW_HOME / "watermarking" / "place_ordering" / "place_wm.sh"
+    sh = FLOW_HOME / "watermarking" / "placement_wm" / "place_wm.sh"
     env = {
         "WM_CELL_LIST":     str(embed_csv),
         "WM_VERIFY_STAGES": f"{stage_odb.stem}:{stage_odb}",
@@ -146,13 +145,13 @@ def _placement_verify(embed_dir: Path, stage_odb: Path) -> tuple:
 
 
 def _cts_verify(embed_dir: Path, stage_odb: Path) -> tuple:
-    """Return (X_C, x_C) via cts_v2 verify on stage_odb."""
+    """Return (X_C, x_C) via cts_wm verify on stage_odb."""
     embed_csv = embed_dir / "wm_cts_pairs_embed_all_stage.csv"
     if not embed_csv.exists():
         embed_csv = embed_dir / "wm_cts_pairs_embed.csv"
     if not embed_csv.exists() or not stage_odb.exists():
         return 0, 0
-    sh = FLOW_HOME / "watermarking" / "cts_v2" / "cts_wm.sh"
+    sh = FLOW_HOME / "watermarking" / "cts_wm" / "cts_wm.sh"
     verify_csv = embed_dir / f"wm_cts_verify_{stage_odb.stem}.csv"
     env = {
         "WM_CELL_LIST":        str(embed_csv),
@@ -169,27 +168,27 @@ def _cts_verify(embed_dir: Path, stage_odb: Path) -> tuple:
     return _read_cts_verify_csv(verify_csv)
 
 
-def _routing_stat(route_dir: Path, stage_odb: Path):
-    """Dump route_counts for stage_odb (writing into route_dir), then compute stat."""
+def _routing_stat(route_dir: Path, stage_odb: Path, design_id: str):
+    """Dump per-net q_R for stage_odb (into route_dir), then compute the stat."""
     if not stage_odb.exists():
         return None
-    counts_csv = route_dir / f"route_counts_{stage_odb.stem}.csv"
+    qr_csv = route_dir / f"route_qr_{stage_odb.stem}.csv"
     wm_nets = route_dir / "watermark_nets.txt"
     if not wm_nets.exists():
         return None
-    if not counts_csv.exists():
+    if not qr_csv.exists():
         try:
             subprocess.run(["bash", str(DUMP_SH)],
                            env={**os.environ,
                                 "WM_ODB": str(stage_odb),
-                                "WM_COUNTS_CSV": str(counts_csv)},
+                                "WM_QR_CSV": str(qr_csv)},
                            check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             return None
-    counts = read_counts_csv(counts_csv)
+    counts = per_net_qr(qr_csv)
     wm_set = read_watermark_nets(wm_nets)
-    return route_stat_from_counts(counts, wm_set)
+    return route_stat_from_qr(counts, wm_set, design_id)
 
 
 def _find_routed_dir(platform: str, design: str, fallback: Path) -> Path:
@@ -288,20 +287,20 @@ def main():
                   "stage": stage, "value": r_C, "X": X_C, "x": x_C}, slug)
 
             # Routing evidence (post_grt / post_drt only)
-            zr_value = ""
+            tr_value = ""
             pR = None
             r_R = None
             if (b.platform == "nangate45" and stage in ("post_grt", "post_drt")
                     and route_dir is not None):
-                rs = _routing_stat(route_dir, odb)
+                rs = _routing_stat(route_dir, odb, b.design)
                 if rs is not None:
-                    zr_value = f"Z={rs.Z_R:.3f}; p={rs.p_R:.3e}"
+                    tr_value = f"T={rs.T_R:.5f}; p={rs.p_R:.3e}"
                     pR = rs.p_R
                     r_R = 1.0 if rs.p_R <= ALPHA_R else 0.0
-            slug = f"{b.platform}_{b.design}_{stage}_ZR"
+            slug = f"{b.platform}_{b.design}_{stage}_TR"
             emit({"platform": b.platform, "design": b.design,
-                  "variant": variant_label, "evidence": "Z_R,p_R",
-                  "stage": stage, "value": zr_value,
+                  "variant": variant_label, "evidence": "T_R,p_R",
+                  "stage": stage, "value": tr_value,
                   "p_R": "" if pR is None else pR,
                   "r_R": "" if r_R is None else r_R,
                   "alpha_R": ALPHA_R}, slug)
@@ -325,7 +324,7 @@ def main():
                   "alpha_R": ALPHA_R}, slug)
 
             print(f"[survival] {b.platform}/{b.design}/{stage}: "
-                  f"r_P={r_P!r} r_C={r_C!r} Z_R/p_R={zr_value!r} r_all={r_all!r}")
+                  f"r_P={r_P!r} r_C={r_C!r} T_R/p_R={tr_value!r} r_all={r_all!r}")
 
     return 0
 

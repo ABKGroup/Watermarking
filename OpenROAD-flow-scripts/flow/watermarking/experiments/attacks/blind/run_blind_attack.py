@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Run blind attacks across all active benches and q_s values (paper §7.1).
 
@@ -10,10 +10,10 @@ For each (design, stage, q_s):
   * all_stage -> chain placement -> CTS -> routing on the same flow
 
 Routing is *skipped* on ASAP7 designs by default (ASAP7's strict-direction
-router produces zero wrong-way segments, making Z_R / p_R structurally
+router produces zero wrong-way wirelength, making T_R / p_R structurally
 undefined).  Override with --no-routing-platforms "".
 
-For each row we report r_P, r_C, Z_R, p_R, r_R, r_all, and the ownership
+For each row we report r_P, r_C, T_R, p_R, r_R, r_all, and the ownership
 decision (paper Tab. wrong-key thresholds).  PPA deltas are produced by the
 decoupled ``attacks/ppa/run_attack_ppa.py`` step on the attacked ODBs.
 
@@ -40,27 +40,13 @@ from lib.orfs import (
     FLOW_HOME, flow_results, experiment_results,
     wm_module_results, find_latest_wm_variant,
 )
-from lib.route_stat import read_counts_csv, route_stat_from_counts
+from lib import orexec
+from lib.route_stat import per_net_qr, route_stat_from_qr
 from lib.thresholds import ownership_pass
 
 
-OPENROAD_EXE = os.environ.get(
-    "OPENROAD_EXE",
-    "/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD/build/bin/openroad")
-SIF = os.environ.get("SINGULARITY_SIF",
-                     "/home/tool/singularity/images/ispd26.sif")
-
-# subprocess passes env=... directly to the child but resolves the executable
-# name against the *parent's* os.environ PATH (POSIX execvp semantics).  If
-# this script is launched in an environment where singularity isn't on PATH,
-# fall back to a known absolute path.
-import shutil as _shutil
-SINGULARITY = _shutil.which("singularity") or "/usr/local/bin/singularity"
-
-
 def or_python(script: Path, env: dict, log: Optional[Path] = None) -> int:
-    cmd = [SINGULARITY, "exec", "-B", "/home", SIF, OPENROAD_EXE,
-           "-python", "-exit", str(script)]
+    cmd = orexec.openroad_python(script)
     if log is None:
         return subprocess.run(cmd, env={**os.environ, **env}).returncode
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -159,19 +145,19 @@ def _pick_embed_dir(plat, nick, wm_flow_variant):
             "4_cts_wm.odb",            legacy / "wm_cts_pairs_embed.csv")
 
 
-def _route_counts_csv(embed_dir: Path, b) -> Optional[Path]:
-    """Return the per-net (wrong_way, total) CSV for this bench, or None."""
+def _route_qr_csv(embed_dir: Path, b) -> Optional[Path]:
+    """Return the per-net (ww_len, tot_len) CSV for this bench, or None."""
     # All-stage consolidated layout
-    for cand in ("route_counts_5_route.csv", "route_counts.csv"):
+    for cand in ("route_qr_5_route.csv", "route_qr.csv"):
         p = embed_dir / cand
         if p.exists():
             return p
-    # Legacy routing_wrong_way module dir
-    route_var = find_latest_wm_variant("routing_wrong_way", b.platform, b.design_nickname)
+    # Per-module routing results dir
+    route_var = find_latest_wm_variant("routing_wm", b.platform, b.design_nickname)
     if route_var:
-        route_dir = wm_module_results("routing_wrong_way", b.platform,
-                                       b.design_nickname, route_var)
-        for cand in ("route_counts_5_route.csv", "route_counts.csv"):
+        route_dir = wm_module_results("routing_wm", b.platform,
+                                      b.design_nickname, route_var)
+        for cand in ("route_qr_5_route.csv", "route_qr.csv"):
             p = route_dir / cand
             if p.exists():
                 return p
@@ -214,7 +200,7 @@ def _attack_placement(b, q_s, out_root, embed_dir, in_odb, embed_csv,
         return None, out_odb, f"placement embed CSV missing: {embed_csv}"
     v_csv = out_root / f"atk_{out_prefix}_{b.platform}_{b.design}_qs{q_s}_verify.csv"
     ver_log = _log_path(out_root, b, out_prefix, q_s, "verify")
-    sh = FLOW_HOME / "watermarking" / "place_ordering" / "place_wm.sh"
+    sh = FLOW_HOME / "watermarking" / "placement_wm" / "place_wm.sh"
     _run_logged(["bash", str(sh), "verify_stages"],
                 env={"WM_CELL_LIST":      str(embed_csv),
                      "WM_VERIFY_STAGES":  f"atk:{out_odb}",
@@ -252,7 +238,7 @@ def _attack_cts(b, q_s, out_root, embed_dir, in_odb, embed_csv,
         return None, out_odb, f"cts embed CSV missing: {embed_csv}"
     v_csv = out_root / f"atk_{out_prefix}_{b.platform}_{b.design}_qs{q_s}_verify.csv"
     ver_log = _log_path(out_root, b, out_prefix, q_s, "verify")
-    sh = FLOW_HOME / "watermarking" / "cts_v2" / "cts_wm.sh"
+    sh = FLOW_HOME / "watermarking" / "cts_wm" / "cts_wm.sh"
     _run_logged(["bash", str(sh), "verify"],
                 env={"WM_CELL_LIST":        str(embed_csv),
                      "WM_CTS_VERIFY_INPUT": str(out_odb),
@@ -267,21 +253,21 @@ def _attack_cts(b, q_s, out_root, embed_dir, in_odb, embed_csv,
 def _attack_routing(b, q_s, out_root, embed_dir, sr, fraction: float, no_route_plats):
     """Run the routing rip-up+reroute attack.
 
-    Returns (Z_R, p_R, atk_odb_path_or_None, note).
+    Returns (T_R, p_R, atk_odb_path_or_None, note).
     """
     if b.platform in no_route_plats:
         return None, None, None, f"routing skipped for platform {b.platform}"
 
-    rc_in = _route_counts_csv(embed_dir, b)
+    rc_in = _route_qr_csv(embed_dir, b)
     if rc_in is None:
-        return None, None, None, "no route_counts*.csv on disk"
+        return None, None, None, "no route_qr*.csv on disk"
 
     # 1) Pick the attack net subset.
     atk_list = out_root / f"atk_r_{b.platform}_{b.design}_qs{q_s}_nets.txt"
     pick_log = _log_path(out_root, b, "r", q_s, "pick")
     rc = _run_logged(
-        ["python3.11", str(HERE / "attacks" / "blind" / "attack_routing.py")],
-        env={"WM_ROUTE_COUNTS_IN":   str(rc_in),
+        [sys.executable, str(HERE / "attacks" / "blind" / "attack_routing.py")],
+        env={"WM_ROUTE_QR_IN":       str(rc_in),
              "WM_NETS_ATTACK_OUT":   str(atk_list),
              "ATK_QS":               str(q_s)},
         log=pick_log)
@@ -293,7 +279,7 @@ def _attack_routing(b, q_s, out_root, embed_dir, sr, fraction: float, no_route_p
     flow_variant = f"atk-r-{b.design}-qs{q_s}"
     wm_results = experiment_results(b.platform, b.design_nickname, flow_variant)
     wm_results.mkdir(parents=True, exist_ok=True)
-    sh = FLOW_HOME / "watermarking" / "routing_wrong_way" / "run_attack_route.sh"
+    sh = FLOW_HOME / "watermarking" / "routing_wm" / "run_attack_route.sh"
     route_log = _log_path(out_root, b, "r", q_s, "route")
     rc2 = _run_logged(["bash", str(sh)],
                       env={"DESIGN":          b.design,
@@ -308,25 +294,25 @@ def _attack_routing(b, q_s, out_root, embed_dir, sr, fraction: float, no_route_p
     if rc2 != 0:
         return None, None, None, f"run_attack_route.sh failed (rc={rc2}, log={route_log})"
 
-    # 3) Dump per-net (wrong_way, total) on the new ODB and run the z-test
+    # 3) Dump per-net q_R on the new ODB and run the randomization test
     #    using the true owner key.
     routed_odb = wm_results / "5_route.odb"
     if not routed_odb.exists():
         return None, None, None, f"no 5_route.odb at {routed_odb}"
-    rc_out = out_root / f"atk_r_{b.platform}_{b.design}_qs{q_s}_counts.csv"
+    rc_out = out_root / f"atk_r_{b.platform}_{b.design}_qs{q_s}_qr.csv"
     dump_log = _log_path(out_root, b, "r", q_s, "dump")
-    _run_logged([str(HERE / "tools" / "dump_route_counts.sh")],
-                env={"WM_ODB":         str(routed_odb),
-                     "WM_COUNTS_CSV": str(rc_out)},
+    _run_logged([str(HERE / "tools" / "dump_route_qr.sh")],
+                env={"WM_ODB":    str(routed_odb),
+                     "WM_QR_CSV": str(rc_out)},
                 log=dump_log)
     if not rc_out.exists():
         return None, None, routed_odb, (
-            f"dump_route_counts.sh produced no CSV (log={dump_log})")
+            f"dump_route_qr.sh produced no CSV (log={dump_log})")
 
-    counts = read_counts_csv(rc_out)
+    counts = per_net_qr(rc_out)
     wm = routing_wm_set(sr, counts.keys(), fraction)
-    st = route_stat_from_counts(counts, wm)
-    return st.Z_R, st.p_R, routed_odb, ""
+    st = route_stat_from_qr(counts, wm, b.design)
+    return st.T_R, st.p_R, routed_odb, ""
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +332,7 @@ def attack_one(b, stage: str, q_s: float, out_root: Path,
 
     rec: dict = {
         "platform": b.platform, "design": b.design, "stage": stage, "q_s": q_s,
-        "r_P": "", "r_C": "", "Z_R": "", "p_R": "",
+        "r_P": "", "r_C": "", "T_R": "", "p_R": "",
         "atk_odb": "", "note": "",
     }
 
@@ -363,9 +349,9 @@ def attack_one(b, stage: str, q_s: float, out_root: Path,
         rec["atk_odb"] = str(atk_odb)
         rec["note"] = note
     elif stage == "routing":
-        ZR, pR, atk_odb, note = _attack_routing(
+        TR, pR, atk_odb, note = _attack_routing(
             b, q_s, out_root, embed_dir, sr, fraction, no_route_plats)
-        if ZR is not None: rec["Z_R"] = ZR
+        if TR is not None: rec["T_R"] = TR
         if pR is not None: rec["p_R"] = pR
         rec["atk_odb"] = str(atk_odb) if atk_odb else ""
         rec["note"] = note
@@ -383,9 +369,9 @@ def attack_one(b, stage: str, q_s: float, out_root: Path,
             b, q_s, out_root, embed_dir, embed_dir / c_odb_name, c_embed_csv)
         if rC is not None: rec["r_C"] = rC
         if n2: notes.append("C:" + n2)
-        ZR, pR, atk_r, n3 = _attack_routing(
+        TR, pR, atk_r, n3 = _attack_routing(
             b, q_s, out_root, embed_dir, sr, fraction, no_route_plats)
-        if ZR is not None: rec["Z_R"] = ZR
+        if TR is not None: rec["T_R"] = TR
         if pR is not None: rec["p_R"] = pR
         if n3: notes.append("R:" + n3)
         rec["atk_odb"] = str(atk_p)  # placement ODB is the primary all-stage artifact
@@ -444,7 +430,7 @@ def main() -> int:
                 (out_root / f"blind_{slug}.json").write_text(json.dumps(rec, indent=2))
                 accept = rec.get("accept", "")
                 print(f"[blind] {slug}: r_P={rec.get('r_P','')} "
-                      f"r_C={rec.get('r_C','')} Z_R={rec.get('Z_R','')} "
+                      f"r_C={rec.get('r_C','')} T_R={rec.get('T_R','')} "
                       f"p_R={rec.get('p_R','')} r_R={rec.get('r_R','')} "
                       f"r_all={rec.get('r_all','')} accept={accept} "
                       f"{rec.get('note','')}")

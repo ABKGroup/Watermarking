@@ -10,48 +10,18 @@
 # Optional env:
 #   FLOW_VARIANT    output variant (default: baseline-icmarks)
 #   BASELINE_K      override K (integer)
-#   PROJ_DIR        default /home/fetzfs_projects/MISC-ytliu/watermarking
 #   IC_ALPHA / IC_BETA / IC_GAMMA  GW score weights
 #   IC_WIN_W / IC_WIN_H / IC_STRIDE_X / IC_STRIDE_Y  GW window/stride
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../../../wm_env.sh"
 
-SIF="${SINGULARITY_SIF:-/home/tool/singularity/images/ispd26.sif}"
-if [[ -z "${SINGULARITY_NAME:-}" ]]; then
-  exec singularity exec -B /home -B /tmp -e "${SIF}" \
-    env \
-    DESIGN="${DESIGN}" \
-    PLATFORM="${PLATFORM}" \
-    WM_FLOW_VARIANT="${WM_FLOW_VARIANT}" \
-    DESIGN_NICKNAME="${DESIGN_NICKNAME:-}" \
-    FLOW_VARIANT="${FLOW_VARIANT:-baseline-icmarks}" \
-    BASELINE_K="${BASELINE_K:-}" \
-    PROJ_DIR="${PROJ_DIR:-/home/fetzfs_projects/MISC-ytliu/watermarking}" \
-    EXPERIMENTS_HOME="${EXPERIMENTS_HOME:-}" \
-    WM_RESULTS_HOME="${WM_RESULTS_HOME:-}" \
-    IC_ALPHA="${IC_ALPHA:-}" \
-    IC_BETA="${IC_BETA:-}" \
-    IC_GAMMA="${IC_GAMMA:-}" \
-    IC_WIN_W="${IC_WIN_W:-}" \
-    IC_WIN_H="${IC_WIN_H:-}" \
-    IC_STRIDE_X="${IC_STRIDE_X:-}" \
-    IC_STRIDE_Y="${IC_STRIDE_Y:-}" \
-    SINGULARITY_NAME="ispd26" \
-    bash -lc "bash \"${BASH_SOURCE[0]}\""
-fi
-
-export PROJ_DIR="${PROJ_DIR:-/home/fetzfs_projects/MISC-ytliu/watermarking}"
-export OPENROAD_EXE="${OPENROAD_EXE:-${PROJ_DIR}/OR0415/OpenROAD/build/bin/openroad}"
-export FLOW_HOME="${FLOW_HOME:-${PROJ_DIR}/OR0415/OpenROAD-flow-scripts/flow}"
-export EXPERIMENTS_HOME="${EXPERIMENTS_HOME:-${FLOW_HOME}/watermarking/experiments}"
-export WM_RESULTS_HOME="${WM_RESULTS_HOME:-${EXPERIMENTS_HOME}/results}"
-export DESIGN_NICKNAME="${DESIGN_NICKNAME:-${DESIGN}}"
+export DESIGN_NICKNAME="${DESIGN_NICKNAME:-${DESIGN:-}}"
 export FLOW_VARIANT="${FLOW_VARIANT:-baseline-icmarks}"
 
-WM_DIR="${FLOW_HOME}/watermarking"
-GEN_KEY_DIR="${WM_DIR}/gen_key"
+WM_DIR="${WM_HOME}"
 
 ts()  { date '+%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] [icmarks/run.sh] $*"; }
@@ -69,7 +39,7 @@ if [[ ! -f "${SEED_HEX}" ]]; then
   log "deriving seed for ${DESIGN} ..."
   ( cd "${GEN_KEY_DIR}" && ./gen_key.sh sign \
       --sk keys/sk.pem --pk keys/pk.pem \
-      --owner-id "${OWNER_ID:-yiting}" \
+      --owner-id "${OWNER_ID}" \
       --design-id "${DESIGN}" \
       --out-dir "out/${DESIGN}" --force )
 fi
@@ -107,7 +77,7 @@ log "embed complete; watermarked ODB at ${OUT_ODB}"
 log "running CTS + route + finish via make wm_cts_and_route ..."
 INPUTS_DIR="${FLOW_HOME}/OR_inputs/place_wm/${PLATFORM}/${DESIGN_NICKNAME}"
 
-make -C "${FLOW_HOME}" \
+wm_exec make -C "${FLOW_HOME}" \
   DESIGN_CONFIG="${FLOW_HOME}/designs/${PLATFORM}/${DESIGN}/config.mk" \
   WORK_HOME="${EXPERIMENTS_HOME}" \
   FLOW_VARIANT="${FLOW_VARIANT}" \

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Chained blind ALL-STAGE attack + post-route PPA (keeps the watermarked flow).
 
@@ -21,7 +21,7 @@ the routing watermark re-routed -- i.e. the real all-stage blind attack, not
 the "perturb placement, run non-watermarking back end" shortcut.
 
 Usage:
-    python3.11 run_postroute_blind.py --platform P --design D --qs Q [--fraction F]
+    python3 run_postroute_blind.py --platform P --design D --qs Q [--fraction F]
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ sys.path.insert(0, str(HERE / "attacks" / "blind"))
 from bench_matrix import ACTIVE_BENCHES
 from lib.orfs import FLOW_HOME, experiment_results, experiment_logs, load_experiment_metrics
 from run_blind_attack import (or_python, _run_logged, _pick_embed_dir,
-                              _route_counts_csv, _log_path)
+                              _route_qr_csv, _log_path)
 
 RAW = HERE / "results" / "phase3" / "raw"
 BLIND = HERE / "attacks" / "blind"
@@ -98,25 +98,25 @@ def main() -> int:
     if b.platform in NO_ROUTE_PLATS:
         print(f"[3/4] no routing channel on {b.platform}; standard route + finish")
         rc = _run_logged(
-            ["bash", str(FLOW_HOME / "watermarking" / "cts_v2" / "run_ppa.sh")],
+            ["bash", str(FLOW_HOME / "watermarking" / "cts_wm" / "run_ppa.sh")],
             env={"DESIGN": b.design, "DESIGN_NICKNAME": nick, "PLATFORM": b.platform,
                  "WM_FLOW_VARIANT": b.wm_flow_variant, "FLOW_VARIANT": variant,
                  "WM_RESULTS": str(wm_results), "CTS_ODB": ca_abs},
             log=_log_path(RAW, b, "blindR", q, "route"))
     else:
         print(f"[3/4] reroute {q} of routing watermark nets + finish")
-        rc_in = _route_counts_csv(embed_dir, b)
+        rc_in = _route_qr_csv(embed_dir, b)
         if rc_in is None:
-            print("[err] no route_counts*.csv for routing attack", file=sys.stderr); return 1
+            print("[err] no route_qr*.csv for routing attack", file=sys.stderr); return 1
         nets = RAW / f"atk_blind_{tag}_nets.txt"
-        rcp = _run_logged(["python3.11", str(BLIND / "attack_routing.py")],
+        rcp = _run_logged([sys.executable, str(BLIND / "attack_routing.py")],
                           env={"WM_ROUTE_COUNTS_IN": str(rc_in),
                                "WM_NETS_ATTACK_OUT": str(nets), "ATK_QS": str(q)},
                           log=_log_path(RAW, b, "blindR", q, "pick"))
         if rcp != 0 or not nets.exists():
             print(f"[err] attack_routing.py failed (rc={rcp})", file=sys.stderr); return 1
         rc = _run_logged(
-            ["bash", str(FLOW_HOME / "watermarking" / "routing_wrong_way" / "run_attack_route.sh")],
+            ["bash", str(FLOW_HOME / "watermarking" / "routing_wm" / "run_attack_route.sh")],
             env={"DESIGN": b.design, "DESIGN_NICKNAME": nick, "PLATFORM": b.platform,
                  "WM_FLOW_VARIANT": b.wm_flow_variant, "FLOW_VARIANT": variant,
                  "WM_RESULTS": str(wm_results), "WM_NETS_ATTACK": str(nets),

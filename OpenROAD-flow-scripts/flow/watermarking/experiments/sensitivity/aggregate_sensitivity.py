@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Aggregate the parameter-sensitivity sweep into one wide CSV.
 
@@ -6,7 +6,7 @@ For each ``(platform, design, stage, knob, value)`` we pull:
 
   * **Capacity**: eligible + selected counts from the embedder's wm_log
     (same regexes as phase1_capacity.py).
-  * **Extraction**: r_P / r_C / Z_R / p_R from the per-cell JSONs written
+  * **Extraction**: r_P / r_C / T_R / p_R from the per-cell JSONs written
     by ``sensitivity/verify_sweep.py``.  ``r_all`` and the ownership pass
     are computed via the standard ``lib.thresholds.ownership_pass()``
     helper so the columns match phase3's blind/targeted CSVs.
@@ -46,8 +46,8 @@ OUT_CSV = HERE / "results" / "phase2" / "sensitivity.csv"
 RAW_DIR = HERE / "results" / "phase2" / "raw"
 
 # --- Capacity-log regexes ---------------------------------------------------
-PLACE_LOGS = FLOW_HOME / "watermarking" / "place_ordering" / "wm_log"
-CTS_LOGS   = FLOW_HOME / "watermarking" / "cts_v2" / "wm_log"
+PLACE_LOGS = FLOW_HOME / "watermarking" / "placement_wm" / "wm_log"
+CTS_LOGS   = FLOW_HOME / "watermarking" / "cts_wm" / "wm_log"
 PLACE_RX_CAND = re.compile(r"pair_candidates=(\d+)\s+triple_candidates=(\d+)")
 PLACE_RX_SEL  = re.compile(r"selected_pairs=(\d+)\s+selected_groups=(\d+)")
 CTS_RX_PROX   = re.compile(
@@ -210,7 +210,7 @@ def main() -> int:
     fields = [
         "platform", "design", "stage", "knob", "value", "variant",
         "eligible", "selected", "detail_a", "detail_b",
-        "r_P", "r_C", "Z_R", "p_R", "r_R", "r_all",
+        "r_P", "r_C", "T_R", "p_R", "r_R", "r_all",
         "pass_P", "pass_C", "pass_R", "num_pass", "pass_all", "accept",
         "dWNS_vs_ref", "dTNS_vs_ref", "dRWL_vs_ref",
         "dPower_vs_ref", "dRuntime_vs_ref",
@@ -227,7 +227,7 @@ def main() -> int:
             # Extraction
             v = _load_verify_json(b, stage_initial, knob, value)
             rP = v.get("r_P"); rC = v.get("r_C")
-            ZR = v.get("Z_R"); pR = v.get("p_R")
+            TR = v.get("T_R"); pR = v.get("p_R")
             note = v.get("note", "")
             # r_R / r_all / ownership decision via shared helper
             own = ownership_pass(
@@ -244,7 +244,7 @@ def main() -> int:
                 "detail_a": a, "detail_b": bx,
                 "r_P": "" if rP is None else rP,
                 "r_C": "" if rC is None else rC,
-                "Z_R": "" if ZR is None else ZR,
+                "T_R": "" if TR is None else TR,
                 "p_R": "" if pR is None else pR,
                 "r_R":     own.get("r_R", ""),
                 "r_all":   own.get("r_all", ""),

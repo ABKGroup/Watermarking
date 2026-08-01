@@ -120,7 +120,7 @@ def aggregate_survival() -> Path:
         wr = csv.DictWriter(f, fieldnames=fields)
         wr.writeheader()
         for r in rows:
-            if r.get("evidence") == "Z_R,p_R" and r.get("platform") != "nangate45":
+            if r.get("evidence") == "T_R,p_R" and r.get("platform") != "nangate45":
                 continue
             wr.writerow({k: r.get(k, "") for k in fields})
     return out_csv
@@ -135,7 +135,7 @@ def aggregate_wrong_key() -> List[Path]:
     # corresponding raw JSON and wrong-key distribution.
     fields = ["platform", "design", "variant", "num_keys", "fraction",
               "alpha_R", "routing_skipped",
-              "true_r_P", "true_r_C", "true_Z_R", "true_p_R", "true_r_R",
+              "true_r_P", "true_r_C", "true_T_R", "true_p_R", "true_r_R",
               "true_Pc", "true_r_all",
               "wrong_key_r_all_mean", "wrong_key_r_all_max",
               "false_positive_rate_r_all", "false_positive_rate_pc",
@@ -244,7 +244,7 @@ def aggregate_blind() -> Path:
     out_csv = RESULTS / "phase3" / "blind.csv"
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     fields = ["platform", "design", "stage", "q_s",
-              "r_P", "r_C", "Z_R", "p_R", "note"]
+              "r_P", "r_C", "T_R", "p_R", "note"]
     with open(out_csv, "w", newline="") as f:
         wr = csv.DictWriter(f, fieldnames=fields)
         wr.writeheader()
@@ -257,7 +257,7 @@ def aggregate_targeted() -> Path:
     """Roll the per-cell targeted_*.json files into results/phase3/targeted.csv.
 
     Schema mirrors blind.csv for the post-attack extraction-rate columns
-    (r_P, r_C, Z_R, p_R, r_R, r_all, pass_*, accept) plus the targeted-
+    (r_P, r_C, T_R, p_R, r_R, r_all, pass_*, accept) plus the targeted-
     specific classifier diagnostics (auc, precision_at_recall, recall_top_K,
     perturbed) and the path of the attacked ODB.  All of these are populated
     by run_targeted_attack.py:attack_one once the placement/CTS top-K mutators
@@ -267,7 +267,7 @@ def aggregate_targeted() -> Path:
     out_csv = RESULTS / "phase3" / "targeted.csv"
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     fields = ["platform", "design", "stage", "q_s",
-              "r_P", "r_C", "Z_R", "p_R",
+              "r_P", "r_C", "T_R", "p_R",
               "r_R", "r_all",
               "pass_P", "pass_C", "pass_R", "num_pass", "pass_all", "accept",
               "perturbed", "auc", "precision_at_recall", "recall_top_K",

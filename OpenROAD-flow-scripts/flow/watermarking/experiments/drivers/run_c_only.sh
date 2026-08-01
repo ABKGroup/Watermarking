@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: BSD-3-Clause
-# C-only PDMarks: cts_v2 embed + route + finish.  The reference 4_cts.odb is
+# C-only PDMarks: cts_wm embed + route + finish.  The reference 4_cts.odb is
 # already on disk under FLOW_RES.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 ensure_keys
 
-CTS_DIR="${FLOW_HOME}/watermarking/cts_v2"
+CTS_DIR="${FLOW_HOME}/watermarking/cts_wm"
 export FLOW_VARIANT="${FLOW_VARIANT:-pdmarks-c-only}"
 apply_adaptive_wm_params cts
 export WM_RESULTS="${WM_RESULTS_HOME}/${PLATFORM}/${DESIGN_NICKNAME}/${FLOW_VARIANT}"

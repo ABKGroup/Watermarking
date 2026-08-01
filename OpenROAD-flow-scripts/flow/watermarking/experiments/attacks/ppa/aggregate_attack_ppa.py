@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Aggregate delta-PPA after blind-attack PPA continuation.
 
@@ -41,8 +41,8 @@ from lib.orfs import (
 OUT_CSV = HERE / "results" / "phase3" / "blind_ppa.csv"
 
 # atk-{tp,tc,tr,p,c,r,all}-<design>-qs<q>
-#   p  = blind placement      (continued via place_ordering/run_ppa.sh)
-#   c  = blind cts            (continued via cts_v2/run_ppa.sh)
+#   p  = blind placement      (continued via placement_wm/run_ppa.sh)
+#   c  = blind cts            (continued via cts_wm/run_ppa.sh)
 #   r  = blind routing        (already complete: run_attack_route.sh runs ORFS)
 #   tp = targeted placement   (same back-end as p; ranked top-K mutation)
 #   tc = targeted cts         (same back-end as c; ranked top-K mutation)

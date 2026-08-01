@@ -21,28 +21,24 @@ if { $wm_strength ne "" } {
   set_routing_watermark_strength $wm_strength
 }
 
+# Step 1 must reproduce the owner's keyed selection exactly, otherwise the
+# "cleared" set in step 2 would not correspond to the real watermark and the
+# measured attack strength would be meaningless.  So a bad seed is fatal here
+# too -- see pre_route_watermark.tcl.
 set seed_path [env_var_or_empty WM_SEED_HEX]
-set used_key 0
-if { $seed_path ne "" && [file exists $seed_path] } {
-  set fp [open $seed_path r]
-  set seed_hex [string trim [read $fp]]
-  close $fp
-  regsub -all {[^0-9a-fA-F]} $seed_hex "" seed_hex
-  if { [string length $seed_hex] == 64 } {
-    set_routing_watermark -key_hex $seed_hex -fraction $wm_fraction
-    set used_key 1
-  } else {
-    puts "attack_route_pre WARN: WM_SEED_HEX is not 64 hex chars; tagging skipped."
-  }
+if { $seed_path eq "" || ![file exists $seed_path] } {
+  error "attack_route_pre: WM_SEED_HEX must point at the owner's\
+         seed_routing.hex (got '$seed_path')."
 }
-
-if { !$used_key } {
-  set wm_message [env_var_or_empty WATERMARK_MESSAGE]
-  if { $wm_message ne "" } {
-    set_routing_watermark -message $wm_message -fraction $wm_fraction
-    set used_key 1
-  }
+set fp [open $seed_path r]
+set seed_hex [string trim [read $fp]]
+close $fp
+regsub -all {[^0-9a-fA-F]} $seed_hex "" seed_hex
+if { [string length $seed_hex] != 64 } {
+  error "attack_route_pre: $seed_path holds [string length $seed_hex] hex\
+         chars, expected 64 (a 32-byte seed)."
 }
+set_routing_watermark -key_hex $seed_hex -fraction $wm_fraction
 
 # Now drop the watermark tag on every attacker-chosen net.
 set atk_file [env_var_or_empty WM_NETS_ATTACK]
@@ -72,7 +68,7 @@ if { $atk_file ne "" && [file exists $atk_file] } {
 # NOTE: square brackets `[...]` in a double-quoted Tcl string trigger command
 # substitution, so we use a bare prefix here (no [...]) to avoid Tcl trying
 # to invoke a command named "attack_route_pre".
-puts "attack_route_pre: used_key=$used_key fraction=$wm_fraction\
+puts "attack_route_pre: fraction=$wm_fraction\
       atk_file=$atk_file requested=$n_total cleared=$n_cleared"
 
 # Dump the resulting watermark-net list (post-attack) so downstream

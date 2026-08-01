@@ -20,7 +20,7 @@ targeted attacker still cannot rank an object using a model trained on that
 same object's label).
 
 This runs under the interpreter that actually has scikit-learn (python3 / 3.6
-in this environment), invoked as a subprocess by the python3.11 driver.
+in this environment), invoked as a subprocess by the driver.
 
 Outputs:
   --out-json     {"auc":..,"precision_at_recall":..,"n":..,"n_pos":..,"note":..}

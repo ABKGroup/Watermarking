@@ -1,11 +1,11 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Extract per-stage watermark capacity from existing embed logs / CSVs.
 
 For each active bench we look at:
 
 * Placement: the most recent ``wm_log/<design>_run_place_wm_ordering_*.log``
-  in ``flow/watermarking/place_ordering/wm_log/``.  The embed script logs
+  in ``flow/watermarking/placement_wm/wm_log/``.  The embed script logs
   three lines we care about:
       "cascade counters: raw_pairs=N ..."
       "candidate enumeration done in ...: pair_candidates=N triple_candidates=N"
@@ -32,8 +32,8 @@ For each active bench we look at:
 
 * Routing: counts the eligible routable signal nets in the post-DRT ODB and
   the selected WM_R subset (via ``experiments/results/.../watermark_nets.txt``).
-  Routed segments per net come from a previously dumped ``route_counts.csv``
-  (produced by experiments/tools/dump_route_counts.py).  If either file is
+  Per-net wirelength comes from a previously dumped ``route_qr.csv``
+  (produced by experiments/tools/dump_route_qr.py).  If either file is
   missing we still emit a row with the placeholder fields filled and the
   routing fields left blank.
 """
@@ -58,9 +58,9 @@ from lib.orfs import (
 OUT_DIR = HERE / "results" / "phase1" / "raw"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-PLACE_LOGS = FLOW_HOME / "watermarking" / "place_ordering" / "wm_log"
-CTS_LOGS   = FLOW_HOME / "watermarking" / "cts_v2" / "wm_log"
-ROUTE_LOGS = FLOW_HOME / "watermarking" / "routing_wrong_way" / "wm_log"
+PLACE_LOGS = FLOW_HOME / "watermarking" / "placement_wm" / "wm_log"
+CTS_LOGS   = FLOW_HOME / "watermarking" / "cts_wm" / "wm_log"
+ROUTE_LOGS = FLOW_HOME / "watermarking" / "routing_wm" / "wm_log"
 
 
 # -----------------------------------------------------------------------------
@@ -261,7 +261,7 @@ def collect_routing(design: str, platform: str, variant: str,
             out["eligible"] = int(m.group("eligible"))
             out["selected"] = int(m.group("selected"))
 
-    # watermark_nets.txt and route_counts.csv live in the experiment result dir,
+    # watermark_nets.txt and route_qr.csv live in the experiment result dir,
     # which mirrors the ORFS layout and uses DESIGN_NICKNAME.
     route_var = find_latest_experiment_variant(platform, nick, "pdmarks-r-only")
     if route_var:
@@ -279,7 +279,7 @@ def collect_routing(design: str, platform: str, variant: str,
     # watermark_nets.txt is authoritative for the selected count.
     out["selected"] = len(wm_nets)
 
-    rc = rdir / "route_counts.csv"
+    rc = rdir / "route_qr.csv"
     if rc.exists():
         sel_seg = 0
         unsel_seg = 0

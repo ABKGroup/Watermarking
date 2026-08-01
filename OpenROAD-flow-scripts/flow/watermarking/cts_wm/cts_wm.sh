@@ -1,114 +1,89 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: BSD-3-Clause
-# Run CTS fanout-parity watermark embed/verify inside Singularity (see README.md).
+# Run the CTS fanout-parity watermark embed / verify under OpenROAD-Python.
+#
+# Runs natively by default.  Set SINGULARITY_SIF to run inside a container
+# instead (see ../wm_env.sh).
+#
+# Every tunable is documented in README.md and defaulted in
+# cts_watermark_embed.py.  This wrapper does NOT re-declare defaults -- it only
+# forwards what the caller actually set, so the argparse defaults stay the
+# single source of truth.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OPENROAD_EXE="${OPENROAD_EXE:-/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD-flow-scripts/tools/install/OpenROAD/bin/openroad}"
-SIF="${SINGULARITY_SIF:-/home/tool/singularity/images/ispd26.sif}"
+source "${SCRIPT_DIR}/../wm_env.sh"
 
 usage() {
-  cat <<EOF
+  cat <<'EOF'
 Usage:
-  $0 embed
-  $0 verify
-  $0 verify_stages
-  $0 all
+  cts_wm.sh embed          embed the watermark (writes ODB + ground-truth CSV)
+  cts_wm.sh verify         verify one ODB against the embed CSV
+  cts_wm.sh verify_stages  verify across a list of stage ODBs
+  cts_wm.sh all            embed, then verify the result
 
-Environment (embed):
-  WM_CTS_INPUT              post-CTS .odb (e.g. .../4_cts.odb)
-  WM_CTS_OUTPUT_ODB         output watermarked .odb
-  WM_CTS_OUTPUT_CSV         optional CSV of embed pairs (ground truth)
-  WM_SEED_HEX               path to seed_cts.hex (from gen_key/)
-  WM_CTS_NUM_PAIRS          target successful embed count (default 32)
-  WM_CTS_SIBLING_DIST_UM    sibling geographic cap in microns (default 20)
-  WM_CTS_DELTA_SITES        boundary-FF delta in site pitches (default 2)
-  WM_CTS_FANOUT_MARGIN      min fanout slack below max_fanout (default 2)
-  WM_CTS_SLEW_HEADROOM_FRAC min slew margin pure-LCB channel (default 0.20)
-  WM_CTS_SKEW_SLACK_PS      extra worst skew pure-LCB (default 20)
-  WM_CTS_MAX_FANOUT         fallback Liberty max_fanout (default 32)
-  WM_CTS_MAX_TRANSITION_NS  fallback Liberty max_transition ns (default 0.4)
-  WM_CTS_MAX_CAP_FF         fallback Liberty max_capacitance fF (default 50)
-  WM_CTS_MAX_ATTEMPTS       boundary-FF attempts per pair (default 3)
-  WM_CTS_R_MAX              quasi-leaf max repair_fanout (default 2)
-  WM_CTS_QL_*               quasi-leaf stricter slew/cap/slack skew (see README)
-  WM_CTS_AVOID_HOLD_REPAIR  1=skip quasi_leaf with hold repair hint (default 1)
-  WM_CTS_CHANNEL_BUDGET     auto|pure_only|quasi_only|N:M
-  WM_SDC                    optional SDC to read for STA
+Required (embed):
+  WM_CTS_INPUT          post-CTS .odb (e.g. .../4_cts.odb)
+  WM_CTS_OUTPUT_ODB     watermarked .odb to write
+  WM_CTS_OUTPUT_CSV     ground-truth CSV of embedded pairs
+  WM_SEED_HEX           seed_cts.hex from gen_key/
 
-Environment (verify):
-  WM_CTS_VERIFY_INPUT       .odb to check
-  WM_CELL_LIST              embed CSV (ground truth)
-  WM_CTS_VERIFY_CSV         optional per-pair verification CSV
+Required (verify):
+  WM_CTS_VERIFY_INPUT   .odb to check
+  WM_CELL_LIST          embed CSV (ground truth)
 
-Environment (verify_stages):
-  WM_CELL_LIST              embed CSV (ground truth)
-  WM_VERIFY_STAGES          'label:odb,label:odb,...'
-  WM_STAGE_REPORT           optional per-pair x stage CSV
+Required (verify_stages):
+  WM_CELL_LIST          embed CSV (ground truth)
+  WM_VERIFY_STAGES      'label:odb,label:odb,...'
+
+All other WM_CTS_* tunables are optional; see README.md for the full table and
+cts_watermark_embed.py for the authoritative defaults.
 
 Example:
-  export WM_CTS_INPUT=.../4_cts.odb WM_CTS_OUTPUT_ODB=.../4_cts_wm.odb
-  export WM_CTS_OUTPUT_CSV=.../wm_cts_pairs_embed.csv
   export WM_SEED_HEX=.../gen_key/out/aes/seed_cts.hex
-  $0 embed
-  export WM_CTS_VERIFY_INPUT=.../4_cts_wm.odb WM_CELL_LIST=.../wm_cts_pairs_embed.csv
-  $0 verify
+  export WM_CTS_INPUT=.../4_cts.odb
+  export WM_CTS_OUTPUT_ODB=.../4_cts_wm.odb
+  export WM_CTS_OUTPUT_CSV=.../wm_cts_pairs_embed.csv
+  ./cts_wm.sh all
 EOF
 }
 
-run_in_singularity() {
-  local inner_cmd="$1"
-  singularity exec -B /home -B /tmp --bind /tmp/.X11-unix -e "$SIF" \
-    env \
-    OPENROAD_EXE="${OPENROAD_EXE}" \
-    WM_CTS_INPUT="${WM_CTS_INPUT:-}" \
-    WM_CTS_OUTPUT_ODB="${WM_CTS_OUTPUT_ODB:-}" \
-    WM_CTS_OUTPUT_CSV="${WM_CTS_OUTPUT_CSV:-}" \
-    WM_CTS_VERIFY_INPUT="${WM_CTS_VERIFY_INPUT:-}" \
-    WM_CTS_VERIFY_CSV="${WM_CTS_VERIFY_CSV:-}" \
-    WM_CELL_LIST="${WM_CELL_LIST:-}" \
-    WM_VERIFY_STAGES="${WM_VERIFY_STAGES:-}" \
-    WM_STAGE_REPORT="${WM_STAGE_REPORT:-}" \
-    WM_SEED_HEX="${WM_SEED_HEX:-}" \
-    WM_SDC="${WM_SDC:-}" \
-    WM_LIB_FILES="${WM_LIB_FILES:-}" \
-    WM_SETRC="${WM_SETRC:-}" \
-    WM_CTS_NUM_PAIRS="${WM_CTS_NUM_PAIRS:-32}" \
-    WM_CTS_SIBLING_DIST_UM="${WM_CTS_SIBLING_DIST_UM:-20}" \
-    WM_CTS_DELTA_SITES="${WM_CTS_DELTA_SITES:-2}" \
-    WM_CTS_FANOUT_MARGIN="${WM_CTS_FANOUT_MARGIN:-2}" \
-    WM_CTS_SLEW_HEADROOM_FRAC="${WM_CTS_SLEW_HEADROOM_FRAC:-0.20}" \
-    WM_CTS_SKEW_SLACK_PS="${WM_CTS_SKEW_SLACK_PS:-20}" \
-    WM_CTS_MAX_FANOUT="${WM_CTS_MAX_FANOUT:-32}" \
-    WM_CTS_MAX_TRANSITION_NS="${WM_CTS_MAX_TRANSITION_NS:-0.4}" \
-    WM_CTS_MAX_CAP_FF="${WM_CTS_MAX_CAP_FF:-50}" \
-    WM_CTS_MAX_ATTEMPTS="${WM_CTS_MAX_ATTEMPTS:-3}" \
-    WM_CTS_R_MAX="${WM_CTS_R_MAX:-2}" \
-    WM_CTS_QL_SLEW_HEADROOM_FRAC="${WM_CTS_QL_SLEW_HEADROOM_FRAC:-}" \
-    WM_CTS_QL_CAP_HEADROOM_FRAC="${WM_CTS_QL_CAP_HEADROOM_FRAC:-0.20}" \
-    WM_CTS_QL_SETUP_SLACK_PS="${WM_CTS_QL_SETUP_SLACK_PS:-50}" \
-    WM_CTS_QL_HOLD_SLACK_PS="${WM_CTS_QL_HOLD_SLACK_PS:-30}" \
-    WM_CTS_QL_SKEW_SLACK_PS="${WM_CTS_QL_SKEW_SLACK_PS:-}" \
-    WM_CTS_AVOID_HOLD_REPAIR="${WM_CTS_AVOID_HOLD_REPAIR:-1}" \
-    WM_CTS_CHANNEL_BUDGET="${WM_CTS_CHANNEL_BUDGET:-auto}" \
-    bash -lc "$inner_cmd"
+# Forward the WM_* knobs the caller actually set, plus the resolved OpenROAD
+# path.  A knob the caller did NOT set is absent from the child environment, so
+# the embedder's argparse default applies -- that is what keeps the defaults in
+# one place.  (wm_env.sh's own WM_HOME / WM_RESULTS_HOME reach the child by
+# ordinary export inheritance; the embedders do not read them.)
+run_wm_python() {
+  local script="$1"
+  local env_args=(PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
+                  OPENROAD_EXE="${OPENROAD_EXE}"
+                  PYTHONPATH="${SCRIPT_DIR}:${PYTHONPATH:-}")
+  local name
+  while IFS= read -r name; do
+    env_args+=("${name}=${!name}")
+  done < <(compgen -v | grep -E '^WM_' || true)
+
+  wm_require_openroad
+  ( cd "${SCRIPT_DIR}" && \
+    wm_exec env "${env_args[@]}" \
+      "${OPENROAD_EXE}" -python -exit "${SCRIPT_DIR}/${script}" )
 }
 
 case "${1:-}" in
   embed)
-    run_in_singularity "export PYTHONPATH=\"${SCRIPT_DIR}:\${PYTHONPATH:-}\" ; cd \"${SCRIPT_DIR}\" ; \"${OPENROAD_EXE}\" -python -exit \"${SCRIPT_DIR}/cts_watermark_embed.py\""
+    run_wm_python cts_watermark_embed.py
     ;;
   verify)
-    run_in_singularity "export PYTHONPATH=\"${SCRIPT_DIR}:\${PYTHONPATH:-}\" ; cd \"${SCRIPT_DIR}\" ; \"${OPENROAD_EXE}\" -python -exit \"${SCRIPT_DIR}/cts_watermark_verify.py\""
+    run_wm_python cts_watermark_verify.py
     ;;
   verify_stages)
-    run_in_singularity "export PYTHONPATH=\"${SCRIPT_DIR}:\${PYTHONPATH:-}\" ; cd \"${SCRIPT_DIR}\" ; \"${OPENROAD_EXE}\" -python -exit \"${SCRIPT_DIR}/cts_watermark_verify_stages.py\""
+    run_wm_python cts_watermark_verify_stages.py
     ;;
   all)
     "$0" embed
-    export WM_CTS_VERIFY_INPUT="${WM_CTS_OUTPUT_ODB:?set WM_CTS_OUTPUT_ODB before run all}"
-    export WM_CELL_LIST="${WM_CTS_OUTPUT_CSV:?set WM_CTS_OUTPUT_CSV before run all}"
+    export WM_CTS_VERIFY_INPUT="${WM_CTS_OUTPUT_ODB:?set WM_CTS_OUTPUT_ODB before 'all'}"
+    export WM_CELL_LIST="${WM_CTS_OUTPUT_CSV:?set WM_CTS_OUTPUT_CSV before 'all'}"
     "$0" verify
     ;;
   -h|--help|help|"")

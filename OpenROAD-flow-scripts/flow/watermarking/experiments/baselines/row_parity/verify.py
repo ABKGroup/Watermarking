@@ -9,7 +9,7 @@ embed time. Works at any post-embed stage (post-CTS, post-GRT, post-DRT).
 Run as:
   openroad -python -exit verify.py \\
       --odb /path/to/N_stage.odb \\
-      --embed-csv /path/to/kahng_embed.csv \\
+      --embed-csv /path/to/row_parity_embed.csv \\
       --stage DRT
 """
 
@@ -32,7 +32,7 @@ _T0 = time.time()
 
 
 def _log(msg: str) -> None:
-    print(f"[{time.strftime('%H:%M:%S')} +{time.time()-_T0:6.1f}s] [kahng:verify] {msg}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')} +{time.time()-_T0:6.1f}s] [row_parity:verify] {msg}", flush=True)
 
 
 def _sorted_row_bottoms(block) -> List[int]:
@@ -120,14 +120,14 @@ def main(argv: List[str]) -> None:
     if missing:
         _log(f"  {missing} instances not found in ODB (possibly removed)")
 
-    out_csv = args.out_csv or str(Path(args.odb).parent / f"kahng_verify_{args.stage}.csv")
+    out_csv = args.out_csv or str(Path(args.odb).parent / f"row_parity_verify_{args.stage}.csv")
     with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["inst", "target_bit", "cur_row", "cur_bit", "match", "note"])
         w.writeheader()
         w.writerows(results)
     _log(f"verify CSV -> {out_csv}")
 
-    print(f"KAHNG_VERIFY stage={args.stage}: K={K} accepted={accepted} Pc={pc:.4e}", flush=True)
+    print(f"ROW_PARITY_VERIFY stage={args.stage}: K={K} accepted={accepted} Pc={pc:.4e}", flush=True)
 
 
 if __name__ == "__main__":

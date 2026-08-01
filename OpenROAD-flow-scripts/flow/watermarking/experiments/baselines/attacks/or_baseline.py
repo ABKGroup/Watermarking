@@ -12,8 +12,8 @@ Two modes (env MODE), parameterized by baseline (env BL):
   mutate -- perturb a set of eligible objects (a random fraction ATK_QS for the
             blind attack, or the explicit WM_OBJECTS_ATTACK list for the
             targeted attack) and write the perturbed ODB:
-              * placement carriers (cell_scattering / kahng / icmarks /
-                automarks): displace each selected cell by (+1 site, +1 row) and
+              * placement carriers (row_parity / icmarks): displace each
+                selected cell by (+1 site, +1 row) and
                 re-legalize -- this flips column-, row- and axis-parity at once,
                 so it disturbs every positional-parity baseline with one
                 operator while pinning the moved cell so the legalizer cannot
@@ -26,7 +26,7 @@ The eligible-set and buffer-insertion logic is imported from each baseline's
 embed module so the reconstruction is byte-faithful to the embedder.
 
 Env:
-  BL                 cell_scattering | kahng | icmarks | automarks | buffer_insertion
+  BL                 row_parity | icmarks | buffer_insertion
   MODE               dump | mutate
   WM_ODB             leaked baseline ODB (3_place_<m>.odb / 4_cts_bufins.odb)
   WM_EMBED_CSV       baseline embed CSV (positive-label / committed source)
@@ -53,8 +53,7 @@ for p in (str(_BASELINES), str(_EXP)):
 import openroad as ord_  # type: ignore
 
 CARRIER = {
-    "cell_scattering": "place", "kahng": "place",
-    "icmarks": "place", "automarks": "place",
+    "row_parity": "place", "icmarks": "place",
     "buffer_insertion": "buffer",
 }
 ID_COL = {"buffer_insertion": "net"}           # default "inst"

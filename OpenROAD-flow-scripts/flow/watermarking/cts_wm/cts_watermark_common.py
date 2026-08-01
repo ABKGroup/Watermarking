@@ -4,20 +4,28 @@
 The 32B ``seed_cts`` byte string (produced by ``watermarking/gen_key/``) is
 used as the HMAC-SHA256 key for all per-pair derivations. There are **no**
 ``WM_KEY`` / ``WM_MESSAGE`` inputs; determinism flows from the seed alone,
-matching the convention established by ``place_site_parity/``.
+matching the convention established by ``placement_wm/``.
 """
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import math
 import os
 import random
 import struct
+import sys
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import odb
+
+# Keyed primitives are shared with every other stage -- see ../wm_prf.py.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from wm_prf import (  # noqa: E402
+    argv_after_openroad_driver,
+    binomial_pc,
+    hmac_digest,
+    load_seed_hex,
+)
 
 # Repair-buffer name hints (inserted by timing repair; not CTS LCB naming).
 _REPAIR_NAME_HINTS = (
@@ -31,56 +39,14 @@ R_MAX_DEFAULT = 2
 # argv / seed loading
 # ---------------------------------------------------------------------------
 
-def argv_after_openroad_driver() -> List[str]:
-    """Return argv slice after ``openroad -python -exit script.py``."""
-    import sys
-
-    skip = {
-        "-python", "-exit", "-no_splash", "-no_init", "-no_settings",
-        "-gui", "-minimize",
-    }
-    raw = sys.argv[1:]
-    i = 0
-    while i < len(raw):
-        a = raw[i]
-        if a in skip:
-            i += 1
-            continue
-        if a.startswith("-threads") and i + 1 < len(raw):
-            i += 2
-            continue
-        break
-    if i < len(raw) and raw[i].endswith(".py"):
-        i += 1
-    return raw[i:]
 
 
-def load_seed_hex(path: str) -> bytes:
-    """Read a hex seed file produced by ``gen_key/`` and return raw bytes."""
-    if not path or not os.path.isfile(path):
-        raise FileNotFoundError(f"WM_SEED_HEX path not found: {path!r}")
-    txt = open(path).read().strip()
-    if len(txt) < 32:
-        raise ValueError(f"seed hex too short in {path}: len={len(txt)}")
-    try:
-        raw = bytes.fromhex(txt)
-    except ValueError as e:
-        raise ValueError(f"seed file {path} is not valid hex: {e}")
-    if len(raw) < 16:
-        raise ValueError(f"seed too short after decode: {len(raw)} bytes")
-    return raw
 
 
 # ---------------------------------------------------------------------------
 # HMAC helpers (all keyed by the 32B seed)
 # ---------------------------------------------------------------------------
 
-def hmac_digest(seed: bytes, *parts: bytes) -> bytes:
-    h = hmac.new(seed, b"", hashlib.sha256)
-    for p in parts:
-        h.update(struct.pack(">I", len(p)))
-        h.update(p)
-    return h.digest()
 
 
 def master_rng(seed: bytes, domain: bytes = b"cts_pairs") -> random.Random:
@@ -722,11 +688,3 @@ def rewire_iterm_to_net(iterm, new_net) -> None:
 # Binomial coincidence (p = 0.5 for parity)
 # ---------------------------------------------------------------------------
 
-def binomial_pc(num_constraints: int, num_failures: int, p: float = 0.5) -> float:
-    """P(at most ``num_failures`` unsatisfied) under i.i.d. P(success)=p."""
-    x = num_failures
-    X = num_constraints
-    total = 0.0
-    for i in range(0, x + 1):
-        total += math.comb(X, i) * (p ** (X - i)) * ((1.0 - p) ** i)
-    return total

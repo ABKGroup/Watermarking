@@ -40,7 +40,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve()
 _WM_ROOT = _HERE.parents[3]                                # .../flow/watermarking
 _EXP_DIR = _WM_ROOT / "experiments"
-sys.path.insert(0, str(_WM_ROOT / "place_ordering"))
+sys.path.insert(0, str(_WM_ROOT / "placement_wm"))
 sys.path.insert(0, str(_EXP_DIR))
 sys.path.insert(0, str(_EXP_DIR / "lib"))
 

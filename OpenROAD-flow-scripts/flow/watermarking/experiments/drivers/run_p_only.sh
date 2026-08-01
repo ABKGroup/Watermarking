@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: BSD-3-Clause
-# P-only PDMarks: place_ordering embed + flow continuation through finish.
+# P-only PDMarks: placement_wm embed + flow continuation through finish.
 source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 ensure_keys
 
-PLACE_DIR="${FLOW_HOME}/watermarking/place_ordering"
+PLACE_DIR="${FLOW_HOME}/watermarking/placement_wm"
 export FLOW_VARIANT="${FLOW_VARIANT:-pdmarks-p-only}"
 apply_adaptive_wm_params place
 # experiments/results/<plat>/<nickname>/ mirrors the ORFS layout.

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.11
+#!/usr/bin/env python3
 # SPDX-License-Identifier: BSD-3-Clause
 """Targeted ML-based attacker (paper §7.2), corrected construction.
 
@@ -9,7 +9,7 @@ For each stage s ∈ {placement, cts, routing} and each design we:
        * placement / cts -> ``dump_features.py`` runs inside OpenROAD-python,
          reconstructs E_s from the ODB, labels WM_s positive / E_s\\WM_s
          negative, and writes observable features.
-       * routing         -> the post-DRT ``route_counts`` CSV already enumerates
+       * routing         -> the post-DRT ``route_qr`` CSV already enumerates
          every routed net; labels come from the seed-derived WM_R.
   2. Train a RandomForest with **cross-validation** (``classify.py``) and report
      the out-of-fold AUC and precision-at-recall.  Out-of-fold scoring removes
@@ -49,7 +49,8 @@ from lib.orfs import (
     FLOW_HOME, experiment_results, flow_results,
     find_latest_wm_variant, wm_module_results,
 )
-from lib.route_stat import read_counts_csv, route_stat_from_counts
+from lib import orexec
+from lib.route_stat import per_net_qr, route_stat_from_qr
 from lib.thresholds import ownership_pass
 from attacks.targeted.features import routing_features
 from attacks.blind.run_blind_attack import (
@@ -58,12 +59,6 @@ from attacks.blind.run_blind_attack import (
     _pick_embed_dir   as blind_pick_embed_dir,
 )
 
-import shutil as _shutil
-OPENROAD_EXE = os.environ.get(
-    "OPENROAD_EXE",
-    "/home/fetzfs_projects/MISC-ytliu/watermarking/OR0415/OpenROAD/build/bin/openroad")
-SIF = os.environ.get("SINGULARITY_SIF", "/home/tool/singularity/images/ispd26.sif")
-SINGULARITY = _shutil.which("singularity") or "/usr/local/bin/singularity"
 # Interpreter that actually has scikit-learn in this environment.
 SKLEARN_PY = os.environ.get("WM_SKLEARN_PY", "python3")
 
@@ -71,8 +66,7 @@ WM_CTS_SIBLING_DIST_UM = os.environ.get("WM_CTS_SIBLING_DIST_UM", "50")
 
 
 def or_python(script: Path, env: dict, log: Optional[Path] = None) -> int:
-    cmd = [SINGULARITY, "exec", "-B", "/home", SIF, OPENROAD_EXE,
-           "-python", "-exit", str(script)]
+    cmd = orexec.openroad_python(script)
     if log is None:
         return subprocess.run(cmd, env={**os.environ, **env}).returncode
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -115,15 +109,15 @@ def _resolve_placement_timing(b) -> Tuple[str, str]:
     return _LIB_CACHE[key], (str(sdc) if sdc.exists() else "")
 
 
-def _route_counts_csv(embed_dir: Path, b) -> Optional[Path]:
-    for cand in ("route_counts_5_route.csv", "route_counts.csv"):
+def _route_qr_csv(embed_dir: Path, b) -> Optional[Path]:
+    for cand in ("route_qr_5_route.csv", "route_qr.csv"):
         p = embed_dir / cand
         if p.exists():
             return p
-    route_var = find_latest_wm_variant("routing_wrong_way", b.platform, b.design_nickname)
+    route_var = find_latest_wm_variant("routing_wm", b.platform, b.design_nickname)
     if route_var:
-        rdir = wm_module_results("routing_wrong_way", b.platform, b.design_nickname, route_var)
-        for cand in ("route_counts_5_route.csv", "route_counts.csv"):
+        rdir = wm_module_results("routing_wm", b.platform, b.design_nickname, route_var)
+        for cand in ("route_qr_5_route.csv", "route_qr.csv"):
             p = rdir / cand
             if p.exists():
                 return p
@@ -143,8 +137,8 @@ def _dataset_paths(out_root: Path, b, stage: str):
 
 def _build_routing_dataset(b, embed_dir, sr, fraction, feat_csv: Path) -> Optional[int]:
     """Write object_id,label,<routing features> for every routed net.  Returns
-    the number of positives, or None if no route_counts CSV exists."""
-    rc_in = _route_counts_csv(embed_dir, b)
+    the number of positives, or None if no route_qr CSV exists."""
+    rc_in = _route_qr_csv(embed_dir, b)
     if rc_in is None:
         return None
     header, rows_X, ids = routing_features(rc_in)
@@ -204,7 +198,7 @@ def ensure_dataset(b, stage, out_root, embed_dir, odb_name, embed_csv,
         elif stage == "routing":
             npos = _build_routing_dataset(b, embed_dir, sr, fraction, feat_csv)
             if npos is None:
-                return None, {"note": "no route_counts.csv / no routed nets"}, None
+                return None, {"note": "no route_qr.csv / no routed nets"}, None
         else:
             return None, {"note": f"unknown stage {stage}"}, None
 
@@ -297,7 +291,7 @@ def _recall_top_k(ranking: List[Tuple[str, int]], K: int, n_pos: int) -> Optiona
 def _base_rec(b, stage, q_s, diag):
     return {
         "platform": b.platform, "design": b.design, "stage": stage, "q_s": q_s,
-        "r_P": "", "r_C": "", "Z_R": "", "p_R": "",
+        "r_P": "", "r_C": "", "T_R": "", "p_R": "",
         "auc": diag.get("auc") if diag.get("auc") is not None else "",
         "precision_at_recall": (diag.get("precision_at_recall")
                                 if diag.get("precision_at_recall") is not None else ""),
@@ -391,7 +385,7 @@ def _targeted_routing(b, q_s, out_root, embed_dir, sr, fraction, no_route_plats,
     flow_variant = f"atk-tr-{b.design}-qs{q_s}"
     wm_results = experiment_results(b.platform, b.design_nickname, flow_variant)
     wm_results.mkdir(parents=True, exist_ok=True)
-    sh = FLOW_HOME / "watermarking" / "routing_wrong_way" / "run_attack_route.sh"
+    sh = FLOW_HOME / "watermarking" / "routing_wm" / "run_attack_route.sh"
     proc = subprocess.run(["bash", str(sh)],
                           env={**os.environ,
                                "DESIGN": b.design, "DESIGN_NICKNAME": b.design_nickname,
@@ -407,15 +401,15 @@ def _targeted_routing(b, q_s, out_root, embed_dir, sr, fraction, no_route_plats,
         rec["note"] = f"no 5_route.odb at {routed_odb}"
         return rec
     rec["atk_odb"] = str(routed_odb)
-    rc_out = out_root / f"atk_tr_{b.platform}_{b.design}_qs{q_s}_counts.csv"
-    subprocess.run([str(HERE / "tools" / "dump_route_counts.sh")],
+    rc_out = out_root / f"atk_tr_{b.platform}_{b.design}_qs{q_s}_qr.csv"
+    subprocess.run([str(HERE / "tools" / "dump_route_qr.sh")],
                    env={**os.environ, "WM_ODB": str(routed_odb),
-                        "WM_COUNTS_CSV": str(rc_out)}, check=False)
+                        "WM_QR_CSV": str(rc_out)}, check=False)
     if rc_out.exists():
-        counts = read_counts_csv(rc_out)
+        counts = per_net_qr(rc_out)
         wm = routing_wm_set(sr, counts.keys(), fraction)
-        st = route_stat_from_counts(counts, wm)
-        rec["Z_R"] = st.Z_R
+        st = route_stat_from_qr(counts, wm, b.design)
+        rec["T_R"] = st.T_R
         rec["p_R"] = st.p_R
     return rec
 
@@ -531,7 +525,7 @@ def main() -> int:
                       f"prec@rec={rec.get('precision_at_recall','')} "
                       f"recall@topK={rec.get('recall_top_K','')} "
                       f"r_P={rec.get('r_P','')} r_C={rec.get('r_C','')} "
-                      f"Z_R={rec.get('Z_R','')} r_all={rec.get('r_all','')} "
+                      f"T_R={rec.get('T_R','')} r_all={rec.get('r_all','')} "
                       f"{rec.get('note','')}")
     return 0
 

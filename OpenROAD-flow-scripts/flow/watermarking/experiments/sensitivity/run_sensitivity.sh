@@ -23,7 +23,18 @@
 #               WATERMARK_STRENGTH      {10, 100, 1000}        (paper lambda_wm)
 #
 # Routing sweeps are ASAP7-skipped by default (strict-direction router ->
-# Z_R/p_R structurally 0/0.5).  Set SENS_ROUTE_ASAP7=1 to force-include.
+# T_R/p_R structurally undefined).  Set SENS_ROUTE_ASAP7=1 to force-include.
+#
+# Selecting a subset of knobs:
+#   The full sweep is long.  Restrict it to one or more knobs with SENS_KNOBS
+#   (space- or comma-separated labels from the table above), which is how you
+#   fan the sweep out across several machines or terminals:
+#
+#     SENS_KNOBS=D_pair       bash run_sensitivity.sh
+#     SENS_KNOBS="f,lambda_wm" bash run_sensitivity.sh
+#     bash run_sensitivity.sh --list        # print the knob labels and exit
+#
+#   Default (unset) runs every knob.
 #
 # Idempotent: cells whose experiments/results/<plat>/<nick>/<FLOW_VARIANT>/
 # 6_report.json already exists are skipped (override with SENS_FORCE=1).
@@ -38,17 +49,40 @@ BENCHES=(
   "asap7     swerv_wrapper base_tcp1455"
 )
 
-# Placement knobs (paper-aligned).
-PLACE_PAIR_DIST_UM=(0.5 1.0 2.0)
-PLACE_HPWL_EPS=(50 100 200)
-PLACE_GUARD_NS=(0.01 0.02 0.05)
+# Knob table: "<label> <stage> <env_var> <value> [<value> ...]"
+# stage is p (placement) | c (CTS) | r (routing); label names the sweep and
+# appears in the per-cell FLOW_VARIANT.
+KNOBS=(
+  "D_pair       p WM_PAIR_DIST_UM        0.5 1.0 2.0"
+  "theta_HPWL   p WM_HPWL_EPS_PAIR_DBU   50 100 200"
+  "delta_guard  p WM_GUARD_DEGRADE_NS    0.01 0.02 0.05"
+  "sibling_um   c WM_CTS_SIBLING_DIST_UM 25 50 100"
+  "f            r WATERMARK_FRACTION     0.025 0.05 0.10"
+  "lambda_wm    r WATERMARK_STRENGTH     10 100 1000"
+)
 
-# CTS knobs.
-CTS_SIBLING=(25 50 100)
+if [[ "${1:-}" = "--list" ]]; then
+  echo "Available SENS_KNOBS labels:"
+  for spec in "${KNOBS[@]}"; do
+    read -r label stage env rest <<<"${spec}"
+    echo "  ${label}  (stage=${stage}, ${env})"
+  done
+  exit 0
+fi
 
-# Routing knobs.
-ROUTE_FRACTION=(0.025 0.05 0.10)
-ROUTE_STRENGTH=(10 100 1000)
+# SENS_KNOBS filter: empty => all knobs.
+_SENS_SELECT="${SENS_KNOBS:-}"
+_SENS_SELECT="${_SENS_SELECT//,/ }"
+
+_knob_enabled() {
+  local label="$1"
+  [[ -z "${_SENS_SELECT}" ]] && return 0
+  local want
+  for want in ${_SENS_SELECT}; do
+    [[ "${want}" = "${label}" ]] && return 0
+  done
+  return 1
+}
 
 mkdir -p "${HERE}/results"
 
@@ -121,51 +155,43 @@ _run_cell() {
     || echo "[sens FAIL] ${plat}/${nick}/${variant} (see ${log})"
 }
 
-run_place_sweep() {
-  local plat="$1" dsgn="$2" var="$3" nick="$4"
-  for v in "${PLACE_PAIR_DIST_UM[@]}"; do
-    _run_cell p WM_PAIR_DIST_UM        "${v}" "${plat}" "${dsgn}" "${var}" "${nick}" "D_pair"
-  done
-  for v in "${PLACE_HPWL_EPS[@]}"; do
-    _run_cell p WM_HPWL_EPS_PAIR_DBU   "${v}" "${plat}" "${dsgn}" "${var}" "${nick}" "theta_HPWL"
-  done
-  for v in "${PLACE_GUARD_NS[@]}"; do
-    _run_cell p WM_GUARD_DEGRADE_NS    "${v}" "${plat}" "${dsgn}" "${var}" "${nick}" "delta_guard"
-  done
-}
+# Run every selected knob of the given stage for one bench.
+run_stage_sweep() {
+  local want_stage="$1" plat="$2" dsgn="$3" var="$4" nick="$5"
 
-run_cts_sweep() {
-  local plat="$1" dsgn="$2" var="$3" nick="$4"
-  for v in "${CTS_SIBLING[@]}"; do
-    _run_cell c WM_CTS_SIBLING_DIST_UM "${v}" "${plat}" "${dsgn}" "${var}" "${nick}" "sibling_um"
-  done
-}
-
-run_route_sweep() {
-  local plat="$1" dsgn="$2" var="$3" nick="$4"
-  # Routing channel structurally undefined on ASAP7 (strict-direction
-  # router -> 0 wrong-way segments) unless overridden.
-  if [[ "${plat}" = "asap7" && "${SENS_ROUTE_ASAP7:-0}" != "1" ]]; then
-    echo "[sens] routing sweep skipped for ${plat}/${dsgn} (set SENS_ROUTE_ASAP7=1 to force)"
-    return 0
+  # The routing channel is structurally undefined on ASAP7 (strict-direction
+  # router -> zero wrong-way wirelength) unless explicitly overridden.
+  if [[ "${want_stage}" = "r" ]]; then
+    if [[ "${SENS_ROUTE:-1}" != "1" ]]; then
+      return 0
+    fi
+    if [[ "${plat}" = "asap7" && "${SENS_ROUTE_ASAP7:-0}" != "1" ]]; then
+      echo "[sens] routing sweep skipped for ${plat}/${dsgn} (set SENS_ROUTE_ASAP7=1 to force)"
+      return 0
+    fi
   fi
-  for v in "${ROUTE_FRACTION[@]}"; do
-    _run_cell r WATERMARK_FRACTION  "${v}" "${plat}" "${dsgn}" "${var}" "${nick}" "f"
-  done
-  for v in "${ROUTE_STRENGTH[@]}"; do
-    _run_cell r WATERMARK_STRENGTH  "${v}" "${plat}" "${dsgn}" "${var}" "${nick}" "lambda_wm"
+
+  local spec label stage env values v
+  for spec in "${KNOBS[@]}"; do
+    read -r label stage env values <<<"${spec}"
+    [[ "${stage}" = "${want_stage}" ]] || continue
+    _knob_enabled "${label}" || continue
+    for v in ${values}; do
+      _run_cell "${stage}" "${env}" "${v}" "${plat}" "${dsgn}" "${var}" "${nick}" "${label}"
+    done
   done
 }
 
+if [[ -n "${_SENS_SELECT}" ]]; then
+  echo "[sensitivity] knob filter: ${_SENS_SELECT}"
+fi
 for spec in "${BENCHES[@]}"; do
   read -r plat dsgn var <<<"$spec"
   nick="$(_resolve_nickname "${plat}" "${dsgn}")"
   echo "[sensitivity] sweeping ${plat}/${dsgn}/${var} (nickname=${nick})"
-  run_place_sweep "$plat" "$dsgn" "$var" "$nick"
-  run_cts_sweep   "$plat" "$dsgn" "$var" "$nick"
-  if [[ "${SENS_ROUTE:-1}" = "1" ]]; then
-    run_route_sweep "$plat" "$dsgn" "$var" "$nick"
-  fi
+  run_stage_sweep p "$plat" "$dsgn" "$var" "$nick"
+  run_stage_sweep c "$plat" "$dsgn" "$var" "$nick"
+  run_stage_sweep r "$plat" "$dsgn" "$var" "$nick"
 done
 echo "[sensitivity] done.  Verify with sensitivity/verify_sweep.py"
 echo "[sensitivity] then aggregate with sensitivity/aggregate_sensitivity.py"

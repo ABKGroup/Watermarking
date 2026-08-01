@@ -12,11 +12,9 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; cd "$HERE"
-FLOW_HOME="$(cd "$HERE/../.." && pwd)"
-WM="$FLOW_HOME/watermarking"
-SIF="${SINGULARITY_SIF:-/home/tool/singularity/images/ispd26.sif}"
-OPENROAD_EXE="${OPENROAD_EXE:-$FLOW_HOME/../../OpenROAD/build/bin/openroad}"
-TCL="$WM/routing_wrong_way/reroute_experiment.tcl"
+source "$HERE/../wm_env.sh"
+WM="$WM_HOME"
+TCL="$WM/routing_wm/reroute_experiment.tcl"
 
 THREADS="${1:-$(nproc)}"
 DRY="${2:-0}"
@@ -48,7 +46,7 @@ run_one () {
   echo "[run ] $plat/$nick mode=$mode threads=$THREADS  $(date '+%H:%M:%S')"
   local t0 t1 wall rc
   t0=$(date +%s.%N)
-  singularity exec -B /home -B /tmp -e "$SIF" env \
+  wm_exec env \
     MODE="$mode" WM_ODB="$(readlink -f "$odb")" WM_OUT_ODB="$TMP_ODB" \
     WM_FRAC=0.02 DRY="$DRY" \
     "$OPENROAD_EXE" -exit -threads "$THREADS" "$TCL" > "$log" 2>&1

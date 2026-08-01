@@ -27,7 +27,7 @@ _wm_clamp_int() {
 }
 
 _wm_ref_info() {
-  python3.11 - "${FLOW_LOG}/6_report.json" "${FLOW_RES}/clock_period.txt" <<'PY'
+  "$(wm_python)" - "${FLOW_LOG}/6_report.json" "${FLOW_RES}/clock_period.txt" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -144,7 +144,7 @@ apply_adaptive_wm_params() {
 
   local route_fraction="${route_fraction_floor}"
   if (( REF_NETS > 0 )); then
-    route_fraction="$(python3.11 - "${route_target}" "${REF_NETS}" "${route_fraction_floor}" <<'PY'
+    route_fraction="$("$(wm_python)" - "${route_target}" "${REF_NETS}" "${route_fraction_floor}" <<'PY'
 import sys
 target = float(sys.argv[1])
 nets = max(float(sys.argv[2]), 1.0)
