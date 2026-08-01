@@ -165,7 +165,7 @@ not need it: `lib.keyless_verify.routing_wm_set(seed, net_names, fraction)`
 reconstructs `WM_R` from the seed alone, which is what makes this stage
 key-recoverable rather than CSV-dependent.
 
-## Attack driver
+<!-- ## Attack driver
 
 `run_attack_route.sh` reproduces the paper's §7.1 routing attack: tag every net
 normally, then clear the `watermark` property on the attacker's chosen subset so
@@ -182,3 +182,4 @@ Because OpenROAD has no per-net rip-up primitive, this re-runs `detail_route`
 over the whole design; `reroute_experiment.tcl` exists to measure how much
 cheaper a *surgical* reroute of only the watermark nets would be
 (`MODE=surgical` vs `MODE=full`).
+-->
