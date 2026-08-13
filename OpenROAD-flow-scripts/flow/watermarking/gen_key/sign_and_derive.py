@@ -91,7 +91,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     outputs = [
-        "M.json", "sig.bin", "pk.pem", "bundle.json",
+        "M.json", "sig.bin", "pk.pem", "bundle.json", "master_seed.hex",
         "seed_placement.hex", "seed_cts.hex", "seed_routing.hex",
     ]
     existing = [o for o in outputs if (out_dir / o).exists()]
@@ -141,12 +141,21 @@ def main() -> int:
     }
     (out_dir / "bundle.json").write_text(json.dumps(bundle, indent=2) + "\n")
 
+    # The master seed is also the certificate key K of paper Section IV.D: the
+    # per-stage seeds and K_Gamma are siblings derived from it by domain
+    # separation.  Written out so `certificate/cert.sh` can be pointed at a file
+    # rather than having to dig it out of bundle.json.  Purely additive -- M,
+    # the signature and every stage seed are unchanged.
+    master_path = out_dir / "master_seed.hex"
+    master_path.write_text(master_seed.hex() + "\n")
+    os.chmod(master_path, 0o600)
+
     for label, seed in seeds.items():
         (out_dir / f"seed_{label}.hex").write_text(seed.hex() + "\n")
 
     print(f"[sign] out dir         : {out_dir}")
     print(f"[sign] pk fingerprint  : {pk_fp}")
-    print(f"[sign] master_seed_hex : {master_seed.hex()}")
+    print(f"[sign] master_seed_hex : {master_seed.hex()}  -> master_seed.hex (0600)")
     for label in sc.STAGE_LABELS:
         print(f"[sign] seed_{label:<9}: {seeds[label].hex()}")
     return 0

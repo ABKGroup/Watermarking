@@ -76,9 +76,32 @@ echo "[run] seed_routing  : ${WM_SEED_HEX}"
 echo "[run] fraction f    : ${WATERMARK_FRACTION}"
 echo "[run] strength lwm  : ${WATERMARK_STRENGTH}"
 
+# Persist the routing parameters next to the results.  Until now f existed only
+# in this log, which is gitignored -- so a verifier could not rebuild WM_R from
+# the key (paper Eq. 20 step 4) and the harness scripts hard-coded 0.01/0.05
+# instead.  Written unconditionally, whether or not the run is later certified.
+mkdir -p "${WM_RESULTS}"
+cat > "${WM_RESULTS}/wm_route_params.json" <<EOF
+{
+  "schema": "pdmarks-route-params/1",
+  "f": ${WATERMARK_FRACTION},
+  "lambda_wm": ${WATERMARK_STRENGTH},
+  "p_report": ${WATERMARK_P},
+  "seed_routing": "${WM_SEED_HEX}"
+}
+EOF
+echo "[run] route params  : ${WM_RESULTS}/wm_route_params.json"
+
 wm_require_openroad
 wm_exec make -f "${FLOW_HOME}/Makefile" \
      DESIGN_CONFIG="${FLOW_HOME}/designs/${PLATFORM}/${DESIGN}/config.mk" \
      OPENROAD_EXE="${OPENROAD_EXE}" \
      WORK_HOME="${EXPERIMENTS_HOME}" \
      wm_route_wrong_way
+
+# Optional per-stage certification; see the note in placement_wm/run_place_wm.sh.
+if [[ "${PDMARKS_CERTIFY:-0}" == "1" ]]; then
+  echo "[run] certify (routing only)"
+  "${WM_HOME}/certificate/cert.sh" certify \
+      --results-dir "${WM_RESULTS}" --stages routing --force
+fi

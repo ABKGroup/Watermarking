@@ -87,3 +87,13 @@ log "output : ${WM_OUTPUT_ODB}"
 log "starting embed + verify"
 
 "${SCRIPT_DIR}/place_wm.sh" all
+
+# Optional per-stage certification (paper Section IV.D).  Off by default: the
+# single-stage runners are mostly capacity and PPA sweeps, which should not pay
+# for certification or burn a fresh nonce.  run_all_stage.sh turns it on.
+if [[ "${PDMARKS_CERTIFY:-0}" == "1" ]]; then
+  log "certify (placement only)"
+  WM_RESULTS="${WM_OUT_RES}" \
+    "${WM_HOME}/certificate/cert.sh" certify \
+      --results-dir "${WM_OUT_RES}" --stages placement --force
+fi

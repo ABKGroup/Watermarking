@@ -78,3 +78,11 @@ echo "[run_cts_wm] output : ${WM_CTS_OUTPUT_ODB}"
 echo "[run_cts_wm] csv    : ${WM_CTS_OUTPUT_CSV}"
 
 "${SCRIPT_DIR}/cts_wm.sh" "${1:-all}"
+
+# Optional per-stage certification; see the note in placement_wm/run_place_wm.sh.
+if [[ "${PDMARKS_CERTIFY:-0}" == "1" ]]; then
+  echo "[run_cts_wm] certify (CTS only)"
+  WM_RESULTS="${WM_OUT_RES}" \
+    "${WM_HOME}/certificate/cert.sh" certify \
+      --results-dir "${WM_OUT_RES}" --stages cts --force
+fi

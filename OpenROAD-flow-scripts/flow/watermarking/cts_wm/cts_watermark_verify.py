@@ -20,6 +20,10 @@ from openroad import Design, Tech
 
 import cts_watermark_common as cc
 
+# Must follow cts_watermark_common: its module-level sys.path.insert is what
+# puts the watermarking root (and therefore wm_claims) on the import path.
+import wm_claims  # noqa: E402
+
 
 @dataclass
 class WmPair:
@@ -44,55 +48,69 @@ def _parse_opt_int(val: object) -> Optional[int]:
         return None
 
 
-def read_pairs_csv(path: str) -> List[WmPair]:
-    """Load accepted watermark pairs from embed CSV (also used by verify_stages).
+def rows_to_pairs(rows, source: str = "") -> List[WmPair]:
+    """Select the accepted watermark pairs from embed-CSV-shaped rows.
 
     The embed CSV is an audit log: it contains successful embeds, failed trial
     rows (for example ``no_boundary_ff``), and bookkeeping skips. Verification
     must only check accepted rows, otherwise failed attempts are reported as
     downstream parity failures.
+
+    Split out of :func:`read_pairs_csv` so the same filtering applies whether
+    the rows came from the CSV or from a sealed certificate; the logic itself is
+    unchanged.
     """
     out: List[WmPair] = []
-    with open(path, newline="") as f:
-        reader = csv.DictReader(f)
-        for r in reader:
-            name = r.get("target_lcb", "").strip()
-            if not name:
-                continue
-            skipped = (r.get("skipped_reason") or "").strip()
-            if skipped:
-                continue
-            try:
-                idx = int(r.get("pair_idx", "0"))
-            except ValueError:
-                idx = 0
-            try:
-                tb = int(r.get("target_bit", "0"))
-            except ValueError:
-                tb = 0
-            final_bit = _parse_opt_int(r.get("final_bit"))
-            if final_bit is not None and final_bit != tb:
-                continue
-            ch = (r.get("channel") or "pure").strip().lower()
-            if ch not in ("pure", "quasi_leaf", "pure_quasi"):
-                ch = "pure"
-            out.append(
-                WmPair(
-                    pair_idx=idx,
-                    pair_key=r.get("pair_key", r.get("parent", "")).strip(),
-                    channel=ch,
-                    l_a=r.get("L_A", "").strip(),
-                    l_b=r.get("L_B", "").strip(),
-                    target_lcb=name,
-                    other_lcb=r.get("other_lcb", "").strip(),
-                    target_bit=tb,
-                    repair_fanout_target=_parse_opt_int(r.get("repair_fanout_target")),
-                    repair_fanout_other=_parse_opt_int(r.get("repair_fanout_other")),
-                )
+    for r in rows:
+        name = r.get("target_lcb", "").strip()
+        if not name:
+            continue
+        skipped = (r.get("skipped_reason") or "").strip()
+        if skipped:
+            continue
+        try:
+            idx = int(r.get("pair_idx", "0"))
+        except ValueError:
+            idx = 0
+        try:
+            tb = int(r.get("target_bit", "0"))
+        except ValueError:
+            tb = 0
+        final_bit = _parse_opt_int(r.get("final_bit"))
+        if final_bit is not None and final_bit != tb:
+            continue
+        ch = (r.get("channel") or "pure").strip().lower()
+        if ch not in ("pure", "quasi_leaf", "pure_quasi"):
+            ch = "pure"
+        out.append(
+            WmPair(
+                pair_idx=idx,
+                pair_key=r.get("pair_key", r.get("parent", "")).strip(),
+                channel=ch,
+                l_a=r.get("L_A", "").strip(),
+                l_b=r.get("L_B", "").strip(),
+                target_lcb=name,
+                other_lcb=r.get("other_lcb", "").strip(),
+                target_bit=tb,
+                repair_fanout_target=_parse_opt_int(r.get("repair_fanout_target")),
+                repair_fanout_other=_parse_opt_int(r.get("repair_fanout_other")),
             )
+        )
     if not out:
-        raise ValueError(f"No watermark pairs found in {path}")
+        raise ValueError(f"No watermark pairs found in {source or '<rows>'}")
     return out
+
+
+def read_pairs_csv(path: str) -> List[WmPair]:
+    """Accepted watermark pairs, from the embed CSV or an encrypted certificate.
+
+    Identical to the previous behaviour unless ``WM_CERT_FILE`` is set, in which
+    case the rows are reconstructed from the sealed certificate (paper Section
+    IV.D) before the same filtering is applied.  ``cts_watermark_verify_stages``
+    imports this name and needs no change.
+    """
+    return rows_to_pairs(wm_claims.load_cts_rows(path),
+                         source=os.environ.get("WM_CERT_FILE") or path)
 
 
 def _write_report_csv(path: str, rows: List[Dict[str, object]]) -> None:
@@ -129,10 +147,12 @@ def main() -> int:
 
     if not args.input:
         p.error("--input (or WM_CTS_VERIFY_INPUT) is required")
-    if not args.cell_list:
-        p.error("--cell-list (or WM_CELL_LIST) is required")
+    if not args.cell_list and not wm_claims.cert_requested():
+        p.error("--cell-list (or WM_CELL_LIST) is required "
+                "(or set WM_CERT_FILE to verify against a certificate)")
 
     pairs = read_pairs_csv(args.cell_list)
+    print(f"[cts_wm_verify] claims={wm_claims.loaded_source()}")
 
     tech = Tech()
     design = Design(tech)

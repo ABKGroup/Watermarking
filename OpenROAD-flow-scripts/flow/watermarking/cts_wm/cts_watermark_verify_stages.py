@@ -18,6 +18,7 @@ from openroad import Design, Tech
 
 import cts_watermark_common as cc
 from cts_watermark_verify import WmPair, read_pairs_csv
+import wm_claims  # noqa: E402  (path provided by cts_watermark_common)
 
 
 @dataclass
@@ -211,8 +212,9 @@ def main() -> int:
     )
     args = p.parse_args(cc.argv_after_openroad_driver())
 
-    if not args.cell_list:
-        p.error("--cell-list (or WM_CELL_LIST) is required")
+    if not args.cell_list and not wm_claims.cert_requested():
+        p.error("--cell-list (or WM_CELL_LIST) is required "
+                "(or set WM_CERT_FILE to verify against a certificate)")
 
     stages: List[Tuple[str, str]] = []
     if args.stage:
@@ -237,7 +239,8 @@ def main() -> int:
     n = len(pairs)
 
     print(
-        f"[cts_wm_verify_stages] pairs={n} from {args.cell_list}\n"
+        f"[cts_wm_verify_stages] pairs={n} claims={wm_claims.loaded_source()} "
+        f"from {os.environ.get('WM_CERT_FILE') or args.cell_list}\n"
         f"{'stage':<18} {'pairs':>7} {'satisfied':>10} {'failed':>8} "
         f"{'missing':>8}  Pc(p=1/2)"
     )

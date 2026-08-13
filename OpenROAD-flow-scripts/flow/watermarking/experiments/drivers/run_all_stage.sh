@@ -66,4 +66,21 @@ WM_RESULTS="${WM_RESULTS}" \
 CTS_ODB="${WM_RESULTS}/4_cts_wm.odb" \
   "${ROUTE_DIR}/run.sh"
 
+# 5) Seal the accepted placement + CTS claims into a certificate and register
+#    the key commitment (paper Section IV.D).  This runs here, and not inside
+#    the per-stage runners, because this is the only point that sees both embed
+#    CSVs *and* the full post-apply_adaptive_wm_params environment -- which is
+#    the only record of the effective parameter set, including the routing f
+#    that a verifier needs to rebuild WM_R from the key.
+if [[ "${PDMARKS_CERTIFY:-1}" == "1" ]]; then
+  log "certify"
+  DESIGN="${DESIGN}" DESIGN_NICKNAME="${DESIGN_NICKNAME}" PLATFORM="${PLATFORM}" \
+  WM_FLOW_VARIANT="${WM_FLOW_VARIANT}" FLOW_VARIANT="${FLOW_VARIANT}" \
+  WM_RESULTS="${WM_RESULTS}" \
+    "${FLOW_HOME}/watermarking/certificate/cert.sh" certify \
+      --results-dir "${WM_RESULTS}" --stages placement,cts,routing --force
+else
+  log "certify skipped (PDMARKS_CERTIFY=0)"
+fi
+
 log "all-stage done; results under ${WM_RESULTS}"

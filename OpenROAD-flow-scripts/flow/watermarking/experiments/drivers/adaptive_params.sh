@@ -102,6 +102,22 @@ apply_adaptive_wm_params() {
 
   eval "$(_wm_ref_info)"
 
+  # Publish the reference-flow facts that selected every knob below.  The
+  # effective parameter set is a function of these, and nothing else on disk
+  # records them -- certify.py seals them into the certificate so a verifier can
+  # tell which configuration produced a given watermark.  WM_-prefixed both to
+  # avoid colliding with any ORFS make variable and so the embedders' env
+  # forwarding (compgen -v | grep '^WM_') carries them along harmlessly.
+  # Nothing reads these during embedding, so this cannot change behaviour.
+  _wm_default WM_REF_TIMING_CLASS "${REF_TIMING_CLASS}"
+  _wm_default WM_REF_TCP          "${REF_TCP}"
+  _wm_default WM_REF_WNS          "${REF_WNS}"
+  _wm_default WM_REF_TNS          "${REF_TNS}"
+  _wm_default WM_REF_STDCELLS     "${REF_STDCELLS}"
+  _wm_default WM_REF_NETS         "${REF_NETS}"
+  _wm_default WM_REF_UTIL         "${REF_UTIL}"
+  _wm_default WM_REF_WNS_FRAC     "${REF_WNS_FRAC}"
+
   local place_target
   local cts_target
   local route_target

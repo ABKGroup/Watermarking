@@ -15,6 +15,10 @@ from openroad import Design, Tech
 
 import watermark_common as wc
 
+# Must follow watermark_common: its module-level sys.path.insert is what puts
+# the watermarking root (and therefore wm_claims) on the import path.
+import wm_claims  # noqa: E402
+
 
 _T0 = time.time()
 
@@ -45,6 +49,17 @@ def _read_csv(path: str) -> List[Dict[str, str]]:
         for row in r:
             rows.append(dict(row))
     return rows
+
+
+def _load_rows(cell_list: str) -> List[Dict[str, str]]:
+    """Claim rows, from the embed CSV or from an encrypted certificate.
+
+    Identical to ``_read_csv`` unless ``WM_CERT_FILE`` is set, in which case the
+    rows are reconstructed from the sealed certificate (paper Section IV.D).
+    Either way they use the embed-CSV schema, so everything downstream --
+    ``_should_verify_row``, ``verify_from_csv`` -- is unchanged.
+    """
+    return wm_claims.load_placement_rows(cell_list)
 
 
 def verify_from_csv(block, rows: Sequence[Dict[str, str]]) -> Tuple[int, int, int, int, List[str]]:
@@ -123,14 +138,16 @@ def main() -> int:
 
     if not args.input:
         p.error("--input / WM_VERIFY_INPUT required")
-    if not args.cell_list:
-        p.error("--cell-list / WM_CELL_LIST required")
+    if not args.cell_list and not wm_claims.cert_requested():
+        p.error("--cell-list / WM_CELL_LIST required "
+                "(or set WM_CERT_FILE to verify against a certificate)")
 
     _log("start")
     _log(f"input={args.input}")
-    _log(f"cell_list={args.cell_list}")
+    _log(f"claims={wm_claims.loaded_source()} "
+         f"source={os.environ.get('WM_CERT_FILE') or args.cell_list}")
     t_phase = time.time()
-    rows = _read_csv(args.cell_list)
+    rows = _load_rows(args.cell_list)
     tech = Tech()
     design = Design(tech)
     design.readDb(args.input)

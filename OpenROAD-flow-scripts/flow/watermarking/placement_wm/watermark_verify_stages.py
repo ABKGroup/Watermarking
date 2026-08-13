@@ -29,8 +29,13 @@ class WmConstraint:
     target_perm: int
 
 
-def _read_constraints_csv(path: str) -> List[WmConstraint]:
-    rows = wv._read_csv(path)
+def _load_constraints(path: str) -> List[WmConstraint]:
+    """Active constraints, from the embed CSV or an encrypted certificate.
+
+    ``wv._load_rows`` is the seam; with ``WM_CERT_FILE`` unset it is exactly the
+    previous ``wv._read_csv`` call.
+    """
+    rows = wv._load_rows(path)
     out: List[WmConstraint] = []
     for row in rows:
         if not wv._should_verify_row(row.get("skipped_reason", "")):
@@ -63,6 +68,10 @@ def _read_constraints_csv(path: str) -> List[WmConstraint]:
                 target_perm=tp,
             ))
     return out
+
+
+#: Retained so existing callers and scripts keep working.
+_read_constraints_csv = _load_constraints
 
 
 def _parse_stages_from_env(s: str) -> List[Tuple[str, str]]:
@@ -332,13 +341,15 @@ def main() -> int:
     p.add_argument("--logs-dir", default=os.environ.get("WM_LOGS_DIR", ""))
     args = p.parse_args(wc.argv_after_openroad_driver())
 
-    if not args.cell_list:
-        p.error("--cell-list / WM_CELL_LIST required")
+    if not args.cell_list and not wv.wm_claims.cert_requested():
+        p.error("--cell-list / WM_CELL_LIST required "
+                "(or set WM_CERT_FILE to verify against a certificate)")
 
-    constraints = _read_constraints_csv(args.cell_list)
+    constraints = _load_constraints(args.cell_list)
     n = len(constraints)
     if n == 0:
-        print("[wm_verify_stages] no active constraints in CSV", file=sys.stderr)
+        print("[wm_verify_stages] no active constraints in "
+              f"{wv.wm_claims.loaded_source()}", file=sys.stderr)
         return 2
 
     stages: List[Tuple[str, str]] = []
@@ -355,7 +366,9 @@ def main() -> int:
         stages = _parse_stages_from_env(env_st)
 
     print(
-        f"[wm_verify_stages] constraints={n} from {args.cell_list}\n"
+        f"[wm_verify_stages] constraints={n} "
+        f"claims={wv.wm_claims.loaded_source()} "
+        f"from {os.environ.get('WM_CERT_FILE') or args.cell_list}\n"
         f"{'stage':<18} {'ok':>8} {'total':>8} {'fail':>8}"
     )
     any_fail = False
